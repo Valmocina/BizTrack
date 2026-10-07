@@ -5,7 +5,19 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
-    <!-- Script to decode redirect parameters from public/404.html -->
+    <!-- Link Web App Manifest -->
+    <link rel="manifest" href="/BizTrack/manifest.json" />
+
+    <!-- App Metadata & Preview Title -->
+    <title>BizTrack</title>
+    <meta name="application-name" content="BizTrack" />
+    <meta name="apple-mobile-web-app-title" content="BizTrack" />
+    <meta property="og:title" content="BizTrack" />
+    <meta property="og:site_name" content="BizTrack" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://valmocina.github.io/BizTrack/" />
+
+    <!-- SPA Redirect Script -->
     <script type="text/javascript">
       (function(l) {
         if (l.search[1] === '/' ) {
@@ -18,8 +30,6 @@
         }
       }(window.location))
     </script>
-
-    <title>BizTrack</title>
   </head>
   <body>
     <div id="root"></div>
