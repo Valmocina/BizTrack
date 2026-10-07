@@ -46,13 +46,22 @@ function Shell() {
   const isAdmin = user?.role === "admin";
   const menu = isAdmin ? adminMenu : employeeMenu;
 
-  const [active, setActive] = useState("Dashboard");
+  // Initialize active tab from localStorage so the page view is preserved on reload or tab blur
+  const [active, setActive] = useState<string>(() => {
+    return localStorage.getItem("biztrack_active_tab") || "Dashboard";
+  });
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<Product | null>(null);
   const [productQuery, setProductQuery] = useState("");
   const [unread, setUnread] = useState(0);
   const [reorderProduct, setReorderProduct] = useState<string>("");
+
+  // Sync state changes with localStorage whenever the active view changes
+  useEffect(() => {
+    localStorage.setItem("biztrack_active_tab", active);
+  }, [active]);
 
   // Show a toast message for 3 seconds
   const notify: Notify = useCallback((message) => {
