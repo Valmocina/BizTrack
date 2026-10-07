@@ -1,5 +1,6 @@
 {
-  "description": "This web application allows users to create and customize visually appealing designs while preserving their chosen color palettes, enhancing creativity and branding.",
+  "title": "BizTrack",
+  "description": "BizTrack inventory management and business tracking system.",
   "robots": {
     "index": false
   },

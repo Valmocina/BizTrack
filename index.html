@@ -2,29 +2,19 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    
-    <!-- Link Web App Manifest -->
-    <link rel="manifest" href="/BizTrack/manifest.json" />
-
-    <!-- Primary App Metadata -->
     <title>BizTrack</title>
-    <meta name="title" content="BizTrack" />
-    <meta name="description" content="BizTrack inventory management and business tracking system." />
 
-    <!-- Open Graph / Facebook Meta Tags -->
+    <!-- og:title and og:description are injected by vite.config.ts from .figma/make/site.json -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://valmocina.github.io/BizTrack/" />
-    <meta property="og:title" content="BizTrack" />
-    <meta property="og:description" content="BizTrack inventory management and business tracking system." />
     <meta property="og:site_name" content="BizTrack" />
+    <meta property="og:url" content="https://valmocina.github.io/BizTrack/" />
 
     <!-- SPA Redirect Handler -->
     <script type="text/javascript">
       (function(l) {
         if (l.search[1] === '/' ) {
-          var decoded = l.search.slice(1).split('&').map(function(s) { 
+          var decoded = l.search.slice(1).split('&').map(function(s) {
             return s.replace(/~and~/g, '&')
           }).join('?');
           window.history.replaceState(null, null,
