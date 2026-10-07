@@ -7,16 +7,11 @@ import siteConfiguration from './.figma/make/site.json' with { type: 'json' }
 
 // Vite config — https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  // .figma/make/deploy-preview passes `--mode development` for cached-preview builds.
   const emitSourcemaps = mode === 'development'
 
   return {
-    // Dynamically uses GitHub repo path for production builds, falling back to Figma/root URLs
-    base: process.env.NODE_ENV === 'production'
-      ? '/YOUR-REPOSITORY-NAME/' // ⚠️ REPLACE WITH YOUR EXACT GITHUB REPOSITORY NAME
-      : process.env.FIGMA_PUBLIC_URL
-        ? `${process.env.FIGMA_PUBLIC_URL}/`
-        : '/',
+    // Clean base path configuration for GitHub Pages
+    base: process.env.NODE_ENV === 'production' ? '/BizTrack/' : '/',
     build: {
       sourcemap: emitSourcemaps ? 'inline' : false,
       minify: !emitSourcemaps,
