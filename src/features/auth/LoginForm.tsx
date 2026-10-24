@@ -33,7 +33,7 @@ export function LoginForm() {
   return (
     <div className="flex min-h-screen bg-white">
       <div className="relative hidden w-[38%] min-w-[260px] overflow-hidden md:block">
-        <img src={`${import.meta.env.BASE_URL}warehouse-login.jpg`} alt="" className="h-full w-full object-cover" />
+        <img src={`${import.meta.env.BASE_URL}login-visual.png`} alt="" className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-r from-[#091b2e]/80 via-[#091b2e]/30 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 p-8 text-white">
           <div className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-white/80 backdrop-blur-sm">
