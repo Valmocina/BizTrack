@@ -60,6 +60,7 @@ create table if not exists public.orders (
   assigned_to uuid references public.profiles (id) on delete set null,
   product_id uuid references public.products (id) on delete set null,
   quantity integer default 1 check (quantity > 0),
+  is_archived boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -72,9 +73,13 @@ create table if not exists public.purchase_orders (
   quantity integer default 1 check (quantity > 0),
   amount numeric(10, 2) not null default 0,
   status text not null default 'Pending',
+  is_archived boolean not null default false,
   expected_date date,
   created_at timestamptz not null default now()
 );
+
+alter table public.orders add column if not exists is_archived boolean not null default false;
+alter table public.purchase_orders add column if not exists is_archived boolean not null default false;
 
 -- INVENTORY TRANSACTIONS
 create table if not exists public.inventory_transactions (
@@ -84,9 +89,12 @@ create table if not exists public.inventory_transactions (
   quantity integer not null check (quantity >= 0),
   reference text,
   remarks text,
+  is_archived boolean not null default false,
   created_by uuid references public.profiles (id) on delete set null default auth.uid(),
   created_at timestamptz not null default now()
 );
+
+alter table public.inventory_transactions add column if not exists is_archived boolean not null default false;
 
 -- NOTIFICATIONS
 create table if not exists public.notifications (
@@ -231,8 +239,10 @@ create policy "po_admin_write" on public.purchase_orders for all to authenticate
 -- Inventory Transactions Policy
 drop policy if exists "tx_select" on public.inventory_transactions;
 drop policy if exists "tx_insert" on public.inventory_transactions;
+drop policy if exists "tx_update" on public.inventory_transactions;
 create policy "tx_select" on public.inventory_transactions for select to authenticated using (true);
 create policy "tx_insert" on public.inventory_transactions for insert to authenticated with check (true);
+create policy "tx_update" on public.inventory_transactions for update to authenticated using (public.is_admin()) with check (public.is_admin());
 
 -- Notifications Policy
 drop policy if exists "notifications_select" on public.notifications;

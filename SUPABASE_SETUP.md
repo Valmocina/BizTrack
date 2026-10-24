@@ -2,6 +2,7 @@
 
 1. Create a project at supabase.com.
 2. Dashboard > SQL Editor: paste and run `supabase/schema.sql` (tables, security rules, 1 sample product).
+   If you already have a database, run `supabase/migrations/20261024140000_add_archive_columns.sql` and `supabase/migrations/20261024140800_add_inventory_transaction_archiving.sql` in the SQL Editor to add the archive fields and admin archive permissions.
 3. Copy `.env.example` to `.env` and fill in the project URL and anon key (Project Settings > API).
 4. Copy `.env.seed.example` to `.env.seed` and fill in the URL and the service role key.
 5. `npm install` then `npm run seed` to create the two demo accounts:

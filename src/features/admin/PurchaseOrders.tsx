@@ -1,96 +1,124 @@
-import { useState, useEffect, type FormEvent } from "react";
-import { DataTable } from "@/components/ui/DataTable";
-import { Icon } from "@/components/ui/Icon";
-import { useLoad } from "@/hooks/useLoad";
-import { formatDate, formatPrice } from "@/services/format";
+import { useState, useEffect, type FormEvent } from "react"
+import { DataTable } from "@/components/ui/DataTable"
+import { Icon } from "@/components/ui/Icon"
+import { useLoad } from "@/hooks/useLoad"
+import { downloadExcel } from "@/services/excel"
+import { formatDate, formatPrice } from "@/services/format"
 import {
+  archivePurchaseOrders,
   createPurchaseOrder,
   listPurchaseOrders,
   poStatuses,
+  restorePurchaseOrders,
   updatePurchaseOrderStatus,
-  clearAllPurchaseOrders,
-} from "@/services/purchaseOrderService";
-import { listSuppliers } from "@/services/supplierService";
-import type { Notify, PurchaseOrder, Supplier } from "@/types";
+} from "@/services/purchaseOrderService"
+import { listSuppliers } from "@/services/supplierService"
+import type { Notify, PurchaseOrder, Supplier } from "@/types"
 
 export function PurchaseOrders({
   notify,
   canEdit,
   initialProductName,
 }: {
-  notify: Notify;
-  canEdit: boolean;
-  initialProductName?: string;
+  notify: Notify
+  canEdit: boolean
+  initialProductName?: string
 }) {
-  const pos = useLoad(listPurchaseOrders, [] as PurchaseOrder[], notify, "purchase stock");
-  const suppliers = useLoad(listSuppliers, [] as Supplier[], notify, "suppliers");
+  const pos = useLoad(
+    listPurchaseOrders,
+    [] as PurchaseOrder[],
+    notify,
+    "purchase stock",
+  )
+  const suppliers = useLoad(
+    listSuppliers,
+    [] as Supplier[],
+    notify,
+    "suppliers",
+  )
 
-  const [showForm, setShowForm] = useState(false);
-  const [selectedSupplierId, setSelectedSupplierId] = useState<string>("");
-  const [selectedProductId, setSelectedProductId] = useState<string>("");
-  const [quantity, setQuantity] = useState<number>(1);
-  const [unitPrice, setUnitPrice] = useState<number>(0);
+  const [recordView, setRecordView] = useState<"active" | "archived">("active")
+  const [statusFilter, setStatusFilter] = useState("All statuses")
+  const [showForm, setShowForm] = useState(false)
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string>("")
+  const [selectedProductId, setSelectedProductId] = useState<string>("")
+  const [quantity, setQuantity] = useState<number>(1)
+  const [unitPrice, setUnitPrice] = useState<number>(0)
+  const activePurchaseOrders = pos.data.filter((po) => !po.isArchived)
+  const archivedPurchaseOrders = pos.data.filter((po) => po.isArchived)
+  const visiblePurchaseOrders = (
+    recordView === "active" ? activePurchaseOrders : archivedPurchaseOrders
+  ).filter(
+    (po) => statusFilter === "All statuses" || po.status === statusFilter,
+  )
 
   // Safely auto-fill supplier and product selection when redirected from Reorder button
   useEffect(() => {
-    if (!initialProductName || suppliers.loading || suppliers.data.length === 0) return;
+    if (!initialProductName || suppliers.loading || suppliers.data.length === 0)
+      return
 
     for (const supplier of suppliers.data) {
       const match = supplier.products?.find(
         (p) =>
           p.productName &&
-          (initialProductName.toLowerCase().includes(p.productName.toLowerCase()) ||
-            p.productName.toLowerCase().includes(initialProductName.toLowerCase()))
-      );
+          (initialProductName
+            .toLowerCase()
+            .includes(p.productName.toLowerCase()) ||
+            p.productName
+              .toLowerCase()
+              .includes(initialProductName.toLowerCase())),
+      )
 
       if (match) {
-        setShowForm(true);
-        setSelectedSupplierId(supplier.id);
-        setSelectedProductId(match.productId || "");
-        setUnitPrice(match.unitPrice || 0);
-        break;
+        setShowForm(true)
+        setSelectedSupplierId(supplier.id)
+        setSelectedProductId(match.productId || "")
+        setUnitPrice(match.unitPrice || 0)
+        break
       }
     }
-  }, [initialProductName, suppliers.data, suppliers.loading]);
+  }, [initialProductName, suppliers.data, suppliers.loading])
 
   useEffect(() => {
-    if (!pos.loading && pos.data.length >= 100) {
+    if (!pos.loading && activePurchaseOrders.length >= 100) {
       const shouldExport = window.confirm(
-        `⚠️ Purchase Stock limit reached (${pos.data.length}/100 records).\n\nIt is recommended to export or print your records before clearing the table. Would you like to open the print/export dialog now?`
-      );
+        `Purchase Stock limit reached (${activePurchaseOrders.length}/100 active records).\n\nIt is recommended to print or export your records before archiving them. Would you like to open the print dialog now?`,
+      )
       if (shouldExport) {
-        window.print();
+        window.print()
       }
     }
-  }, [pos.data.length, pos.loading]);
+  }, [activePurchaseOrders.length, pos.loading])
 
   // Find currently selected supplier object
-  const selectedSupplier = suppliers.data.find((s) => s.id === selectedSupplierId);
+  const selectedSupplier = suppliers.data.find(
+    (s) => s.id === selectedSupplierId,
+  )
 
   // Filter available products based on selected supplier's offered products array
-  const availableProducts = selectedSupplier?.products || [];
+  const availableProducts = selectedSupplier?.products || []
 
   // Handle supplier selection
   const handleSupplierChange = (supplierId: string) => {
-    setSelectedSupplierId(supplierId);
-    setSelectedProductId("");
-    setUnitPrice(0);
-  };
+    setSelectedSupplierId(supplierId)
+    setSelectedProductId("")
+    setUnitPrice(0)
+  }
 
   // Handle product selection
   const handleProductChange = (productId: string) => {
-    setSelectedProductId(productId);
-    const matchedItem = availableProducts.find((p) => p.productId === productId);
+    setSelectedProductId(productId)
+    const matchedItem = availableProducts.find((p) => p.productId === productId)
     if (matchedItem) {
-      setUnitPrice(matchedItem.unitPrice);
+      setUnitPrice(matchedItem.unitPrice)
     }
-  };
+  }
 
-  const calculatedTotal = (quantity * unitPrice).toFixed(2);
+  const calculatedTotal = (quantity * unitPrice).toFixed(2)
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
     try {
       await createPurchaseOrder({
         supplierId: selectedSupplierId || null,
@@ -98,54 +126,100 @@ export function PurchaseOrders({
         quantity: quantity,
         amount: Number(calculatedTotal),
         expectedDate: String(form.get("expected") || "") || null,
-      });
-      notify("Stock purchase recorded successfully.");
-      setShowForm(false);
-      setSelectedSupplierId("");
-      setSelectedProductId("");
-      setQuantity(1);
-      setUnitPrice(0);
-      await pos.reload();
+      })
+      notify("Stock purchase recorded successfully.")
+      setShowForm(false)
+      setSelectedSupplierId("")
+      setSelectedProductId("")
+      setQuantity(1)
+      setUnitPrice(0)
+      await pos.reload()
     } catch (error) {
-      notify(`Could not save: ${(error as Error).message}`);
+      notify(`Could not save: ${(error as Error).message}`)
     }
-  };
+  }
 
   const changeStatus = async (po: PurchaseOrder, status: string) => {
     try {
-      await updatePurchaseOrderStatus(po.id, status);
-      pos.setData((current) => current.map((p) => (p.id === po.id ? { ...p, status } : p)));
-      notify("Status updated.");
+      await updatePurchaseOrderStatus(po.id, status)
+      pos.setData((current) =>
+        current.map((p) => (p.id === po.id ? { ...p, status } : p)),
+      )
+      notify("Status updated.")
     } catch (error) {
-      notify(`Could not update: ${(error as Error).message}`);
+      notify(`Could not update: ${(error as Error).message}`)
     }
-  };
+  }
 
-  const handleClearTable = async () => {
-    const confirmClear = window.confirm("Are you sure you want to clear ALL purchase stock records? This action cannot be undone.");
-    if (!confirmClear) return;
+  const handleArchive = async () => {
+    if (
+      !window.confirm(
+        `Archive these ${visiblePurchaseOrders.length} purchase stock records? You can restore them from the Archived tab.`,
+      )
+    )
+      return
 
     try {
-      await clearAllPurchaseOrders();
-      notify("Purchase stock history cleared successfully.");
-      await pos.reload();
+      await archivePurchaseOrders(visiblePurchaseOrders.map((po) => po.id))
+      notify("Purchase stock records archived.")
+      await pos.reload()
     } catch (error) {
-      notify(`Could not clear table: ${(error as Error).message}`);
+      notify(`Could not archive purchase stock: ${(error as Error).message}`)
     }
-  };
+  }
 
-  const rows = pos.data.map((p) => {
-    const isLocked = p.status === "Received" || p.status === "Cancelled";
+  const handleRestore = async () => {
+    try {
+      await restorePurchaseOrders(visiblePurchaseOrders.map((po) => po.id))
+      notify("Purchase stock records restored.")
+      await pos.reload()
+    } catch (error) {
+      notify(`Could not restore purchase stock: ${(error as Error).message}`)
+    }
+  }
 
-    let statusStyle = "input !h-9 !w-40 !text-[13px] font-medium";
+  const exportExcel = async () => {
+    try {
+      await downloadExcel("purchase-stock.xlsx", "Purchase Stock", [
+        [
+          "Order #",
+          "Supplier",
+          "Product",
+          "Qty",
+          "Amount",
+          "Expected Date",
+          "Status",
+        ],
+        ...visiblePurchaseOrders.map((po) => [
+          po.poNumber,
+          po.supplierName,
+          po.productName ?? "—",
+          String(po.quantity),
+          formatPrice(po.amount),
+          formatDate(po.expectedDate),
+          po.status,
+        ]),
+      ])
+    } catch (error) {
+      notify(`Could not export purchase stock: ${(error as Error).message}`)
+    }
+  }
+
+  const rows = visiblePurchaseOrders.map((p) => {
+    const isLocked = p.status === "Received" || p.status === "Cancelled"
+
+    let statusStyle = "input !h-9 !w-40 !text-[13px] font-medium"
     if (p.status === "Received") {
-      statusStyle += " bg-emerald-100 text-emerald-800 border-emerald-300 font-semibold cursor-not-allowed opacity-90";
+      statusStyle +=
+        " bg-emerald-100 text-emerald-800 border-emerald-300 font-semibold cursor-not-allowed opacity-90"
     } else if (p.status === "Cancelled") {
-      statusStyle += " bg-red-100 text-red-800 border-red-300 font-semibold cursor-not-allowed opacity-90";
+      statusStyle +=
+        " bg-red-100 text-red-800 border-red-300 font-semibold cursor-not-allowed opacity-90"
     } else if (p.status === "In transit") {
-      statusStyle += " bg-blue-100 text-blue-800 border-blue-300 font-semibold";
+      statusStyle += " bg-blue-100 text-blue-800 border-blue-300 font-semibold"
     } else {
-      statusStyle += " bg-amber-100 text-amber-800 border-amber-300 font-semibold";
+      statusStyle +=
+        " bg-amber-100 text-amber-800 border-amber-300 font-semibold"
     }
 
     return [
@@ -157,7 +231,7 @@ export function PurchaseOrders({
       formatDate(p.expectedDate),
       <select
         value={p.status}
-        disabled={isLocked}
+        disabled={isLocked || p.isArchived}
         onChange={(e) => changeStatus(p, e.target.value)}
         className={statusStyle}
         key={`status-${p.id}`}
@@ -168,52 +242,117 @@ export function PurchaseOrders({
           </option>
         ))}
       </select>,
-    ];
-  });
+    ]
+  })
 
   return (
     <div className="space-y-5">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <h1 className="page-title">Purchase Stock ({pos.data.length})</h1>
 
-        <div className="flex gap-2 items-center">
-          <button className="btn-secondary flex items-center gap-1" onClick={() => window.print()} title="Export / Print Records">
-            Export
+        <div className="flex flex-wrap gap-2 items-center print:hidden">
+          <button
+            className="btn-secondary flex items-center gap-1"
+            onClick={() => window.print()}
+            title="Print visible records"
+          >
+            Print
           </button>
 
-          {canEdit && pos.data.length > 0 && (
-            <button
-              className="btn-secondary !bg-red-50 !text-red-600 hover:!bg-red-100 border-red-200"
-              onClick={handleClearTable}
-            >
-              Clear Table
-            </button>
-          )}
+          <button
+            className="btn-secondary flex items-center gap-1"
+            onClick={exportExcel}
+            title="Download visible records as an Excel workbook"
+          >
+            Excel
+          </button>
 
-          {canEdit && (
-            <button 
+          {canEdit &&
+            recordView === "active" &&
+            visiblePurchaseOrders.length > 0 && (
+              <button className="btn-secondary" onClick={handleArchive}>
+                Archive ({visiblePurchaseOrders.length})
+              </button>
+            )}
+
+          {canEdit &&
+            recordView === "archived" &&
+            visiblePurchaseOrders.length > 0 && (
+              <button className="btn-secondary" onClick={handleRestore}>
+                Restore ({visiblePurchaseOrders.length})
+              </button>
+            )}
+
+          {canEdit && recordView === "active" && (
+            <button
               className={`flex items-center gap-2 ${
-                showForm 
-                  ? "btn-secondary !bg-red-50 !text-red-600 hover:!bg-red-100 border-red-200" 
+                showForm
+                  ? "btn-secondary !bg-red-50 !text-red-600 hover:!bg-red-100 border-red-200"
                   : "btn-primary"
-              }`} 
+              }`}
               onClick={() => setShowForm(!showForm)}
             >
-              <Icon name={showForm ? "close" : "plus"} size={16} /> 
+              <Icon name={showForm ? "close" : "plus"} size={16} />
               {showForm ? "Cancel" : "Purchase Stock"}
             </button>
           )}
         </div>
       </div>
 
-      {showForm && canEdit && (
-        <form onSubmit={submit} className="card grid gap-4 p-5 sm:grid-cols-3">
+      <div className="flex flex-wrap items-center gap-2 print:hidden">
+        {(["active", "archived"] as const).map((view) => (
+          <button
+            key={view}
+            type="button"
+            aria-pressed={recordView === view}
+            onClick={() => setRecordView(view)}
+            className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
+              recordView === view
+                ? "border-[#2563eb] bg-[#eff6ff] text-[#1d4ed8]"
+                : "border-[#e5ebf3] bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            {view === "active" ? "Active" : "Archived"} (
+            {view === "active"
+              ? activePurchaseOrders.length
+              : archivedPurchaseOrders.length}
+            )
+          </button>
+        ))}
+        <label className="field ml-auto !mb-0 flex-row items-center gap-2">
+          <span className="whitespace-nowrap">Status</span>
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="!h-10"
+          >
+            <option>All statuses</option>
+            {poStatuses.map((status) => (
+              <option key={status}>{status}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {showForm && canEdit && recordView === "active" && (
+        <form
+          onSubmit={submit}
+          className="card grid gap-4 p-5 print:hidden sm:grid-cols-3"
+        >
           <label className="field">
             <span>Supplier</span>
-            <select value={selectedSupplierId} onChange={(e) => handleSupplierChange(e.target.value)} required>
-              <option value="" disabled>Select supplier</option>
+            <select
+              value={selectedSupplierId}
+              onChange={(e) => handleSupplierChange(e.target.value)}
+              required
+            >
+              <option value="" disabled>
+                Select supplier
+              </option>
               {suppliers.data.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
               ))}
             </select>
           </label>
@@ -230,8 +369,8 @@ export function PurchaseOrders({
                 {!selectedSupplierId
                   ? "Select a supplier first"
                   : availableProducts.length === 0
-                  ? "No products assigned to supplier"
-                  : "Select product"}
+                    ? "No products assigned to supplier"
+                    : "Select product"}
               </option>
               {availableProducts.map((sp) => (
                 <option key={sp.productId} value={sp.productId}>
@@ -278,8 +417,8 @@ export function PurchaseOrders({
           </label>
 
           <div className="sm:col-span-3 flex justify-end gap-2">
-            <button 
-              type="button" 
+            <button
+              type="button"
               className="btn-secondary !bg-red-50 !text-red-600 hover:!bg-red-100 border-red-200 !h-10 px-6"
               onClick={() => setShowForm(false)}
             >
@@ -293,11 +432,23 @@ export function PurchaseOrders({
       )}
 
       <DataTable
-        columns={["Order #", "Supplier", "Product", "Qty", "Amount", "Expected Date", "Status"]}
+        columns={[
+          "Order #",
+          "Supplier",
+          "Product",
+          "Qty",
+          "Amount",
+          "Expected Date",
+          "Status",
+        ]}
         rows={rows}
         loading={pos.loading}
-        emptyText="No stock purchase records found."
+        emptyText={
+          statusFilter === "All statuses"
+            ? `No ${recordView} purchase stock records.`
+            : `No ${recordView} records with this status.`
+        }
       />
     </div>
-  );
+  )
 }

@@ -1,38 +1,92 @@
 // Stock movements in the Supabase `inventory_transactions` table.
 // The database updates product stock automatically when a row is inserted.
-import { supabase } from "@/services/supabaseClient";
-import type { InventoryTransaction, TxType } from "@/types";
+import { supabase } from "@/services/supabaseClient"
+import type { InventoryTransaction, TxType } from "@/types"
 
-export async function clearInventoryTransactions(): Promise<void> {
-  const { error } = await supabase
-    .from("inventory_transactions")
-    .delete()
-    .neq("id", "00000000-0000-0000-0000-000000000000"); // Standard way to delete all rows in Supabase
+export async function archiveInventoryTransactions(
+  ids: string[],
+): Promise<void> {
+  for (let index = 0; index < ids.length; index += 100) {
+    const { error } = await supabase
+      .from("inventory_transactions")
+      .update({ is_archived: true })
+      .in("id", ids.slice(index, index + 100))
+    if (error) throw new Error(error.message)
+  }
+}
 
-  if (error) {
-    console.error("Error clearing inventory transactions:", error.message);
-    throw new Error(error.message);
+export async function restoreInventoryTransactions(
+  ids: string[],
+): Promise<void> {
+  for (let index = 0; index < ids.length; index += 100) {
+    const { error } = await supabase
+      .from("inventory_transactions")
+      .update({ is_archived: false })
+      .in("id", ids.slice(index, index + 100))
+    if (error) throw new Error(error.message)
   }
 }
 
 type TxRow = {
-  id: string; type: TxType; quantity: number; reference: string | null; remarks: string | null; created_at: string;
-  products: { name: string } | { name: string }[] | null;
-};
-
-export async function listTransactions(): Promise<InventoryTransaction[]> {
-  const { data, error } = await supabase.from("inventory_transactions").select("id, type, quantity, reference, remarks, created_at, products(name)").order("created_at", { ascending: false }).limit(1000);
-  if (error) throw new Error(error.message);
-  return (data as unknown as TxRow[]).map((r) => {
-    const product = Array.isArray(r.products) ? r.products[0] : r.products;
-    return { id: r.id, productName: product?.name ?? "—", type: r.type, quantity: r.quantity, reference: r.reference ?? "", remarks: r.remarks ?? "", createdAt: r.created_at };
-  });
+  id: string
+  type: TxType
+  quantity: number
+  reference: string | null
+  remarks: string | null
+  is_archived: boolean
+  created_at: string
+  products: { name: string } | { name: string }[] | null
 }
 
-export async function createTransaction(input: { productId: string; type: TxType; quantity: number; reference: string; remarks: string }): Promise<void> {
+export async function listTransactions(): Promise<InventoryTransaction[]> {
+  const transactions: InventoryTransaction[] = []
+  const pageSize = 1000
+
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase
+      .from("inventory_transactions")
+      .select(
+        "id, type, quantity, reference, remarks, is_archived, created_at, products(name)",
+      )
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1)
+    if (error) throw new Error(error.message)
+
+    const rows = data as unknown as TxRow[]
+    transactions.push(
+      ...rows.map((r) => {
+        const product = Array.isArray(r.products) ? r.products[0] : r.products
+        return {
+          id: r.id,
+          productName: product?.name ?? "—",
+          type: r.type,
+          quantity: r.quantity,
+          reference: r.reference ?? "",
+          remarks: r.remarks ?? "",
+          isArchived: r.is_archived,
+          createdAt: r.created_at,
+        }
+      }),
+    )
+
+    if (rows.length < pageSize) return transactions
+  }
+}
+
+export async function createTransaction(input: {
+  productId: string
+  type: TxType
+  quantity: number
+  reference: string
+  remarks: string
+}): Promise<void> {
   const { error } = await supabase.from("inventory_transactions").insert({
-    product_id: input.productId, type: input.type, quantity: input.quantity,
-    reference: input.reference || null, remarks: input.remarks || null,
-  });
-  if (error) throw new Error(error.message);
+    product_id: input.productId,
+    type: input.type,
+    quantity: input.quantity,
+    reference: input.reference || null,
+    remarks: input.remarks || null,
+  })
+  if (error) throw new Error(error.message)
 }
