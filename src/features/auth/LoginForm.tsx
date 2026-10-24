@@ -32,17 +32,8 @@ export function LoginForm() {
 
   return (
     <div className="flex min-h-screen bg-white">
-      <div className="relative hidden w-[38%] min-w-[260px] overflow-hidden md:block">
-        <img src="/warehouse-login.jpg" alt="" className="h-full w-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#091b2e]/80 via-[#091b2e]/30 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 p-8 text-white">
-          <div className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-white/80 backdrop-blur-sm">
-            BizTrack
-          </div>
-          <p className="mt-4 max-w-xs text-2xl font-semibold leading-tight text-white">
-            Smarter operations for every warehouse move.
-          </p>
-        </div>
+      <div className="hidden w-[38%] min-w-[260px] overflow-hidden md:block">
+        <img src="/login-visual.png" alt="" className="h-full w-full object-cover" />
       </div>
       <main className="flex flex-1 items-center justify-center px-6 py-10">
         <form onSubmit={submit} className="w-full max-w-[575px]">
