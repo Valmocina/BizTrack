@@ -37,6 +37,18 @@ export async function restoreOrders(ids: string[]): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
+export async function deleteArchivedOrder(id: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("orders")
+    .delete()
+    .eq("id", id)
+    .eq("is_archived", true)
+    .select("id")
+  if (error) throw new Error(error.message)
+  if (!data?.length)
+    throw new Error("Only archived orders can be permanently deleted.")
+}
+
 export async function listOrders(): Promise<Order[]> {
   const { data, error } = await supabase
     .from("orders")
@@ -90,6 +102,17 @@ export async function updateOrderStatus(
   const { error } = await supabase
     .from("orders")
     .update({ status })
+    .eq("id", id)
+  if (error) throw new Error(error.message)
+}
+
+export async function updateOrderAssignee(
+  id: string,
+  assignedTo: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from("orders")
+    .update({ assigned_to: assignedTo })
     .eq("id", id)
   if (error) throw new Error(error.message)
 }

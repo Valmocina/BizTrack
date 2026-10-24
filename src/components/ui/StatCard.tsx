@@ -13,8 +13,8 @@ export function StatCard({ icon, tint, label, value, change, note, warn }: {
         <div className="flex items-end justify-between gap-2">
           <p className="text-[34px] font-bold leading-tight tracking-tight text-slate-800">{value}</p>
           <div className="mb-1 text-right">
-            {change && <p className={`text-[11px] font-bold ${warn ? "text-amber-600" : "text-emerald-500"}`}>{warn ? "" : "↑ "}{change}</p>}
-            {note && <p className="text-[10px] text-slate-400">{note}</p>}
+            {change && <p className={`text-xs font-bold ${warn ? "text-amber-700" : "text-emerald-700"}`}>{warn ? "" : "↑ "}{change}</p>}
+            {note && <p className="text-xs text-slate-600">{note}</p>}
           </div>
         </div>
       </div>

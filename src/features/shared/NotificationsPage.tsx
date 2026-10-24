@@ -1,86 +1,102 @@
-import { DataTable } from "@/components/ui/DataTable";
-import { Icon } from "@/components/ui/Icon";
-import { Pill } from "@/components/ui/Pill";
-import { useLoad } from "@/hooks/useLoad";
-import { formatDate } from "@/services/format";
+import { DataTable } from "@/components/ui/DataTable"
+import { Icon } from "@/components/ui/Icon"
+import { Pill } from "@/components/ui/Pill"
+import { useLoad } from "@/hooks/useLoad"
+import { formatDate } from "@/services/format"
 import {
   clearNotifications,
   deleteNotification,
   listNotifications,
   markAllRead,
   markAsRead,
-} from "@/services/notificationService";
-import type { AppNotification, Notify } from "@/types";
+} from "@/services/notificationService"
+import type { AppNotification, Notify } from "@/types"
 
 export function NotificationsPage({
   notify,
   onChange,
   onReorder,
+  onViewOrder,
 }: {
-  notify: Notify;
-  onChange: () => void;
-  onReorder?: (productName: string) => void;
+  notify: Notify
+  onChange: () => void
+  onReorder?: (productName: string) => void
+  onViewOrder?: (orderNumber: string) => void
 }) {
-  const { data: notifications, setData: setNotifications, loading, reload } = useLoad(
+  const {
+    data: notifications,
+    setData: setNotifications,
+    loading,
+    reload,
+  } = useLoad(
     listNotifications,
     [] as AppNotification[],
     notify,
-    "notifications"
-  );
+    "notifications",
+  )
 
   const handleMarkRead = async (id: string) => {
     try {
-      await markAsRead(id);
-      setNotifications((curr) => curr.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
-      onChange();
+      await markAsRead(id)
+      setNotifications((curr) =>
+        curr.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
+      )
+      onChange()
     } catch (error) {
-      notify(`Could not update notification: ${(error as Error).message}`);
+      notify(`Could not update notification: ${(error as Error).message}`)
     }
-  };
+  }
 
   const handleMarkAllRead = async () => {
     try {
-      await markAllRead();
-      setNotifications((curr) => curr.map((n) => ({ ...n, isRead: true })));
-      onChange();
-      notify("All notifications marked as read.");
+      await markAllRead()
+      setNotifications((curr) => curr.map((n) => ({ ...n, isRead: true })))
+      onChange()
+      notify("All notifications marked as read.")
     } catch (error) {
-      notify(`Could not update: ${(error as Error).message}`);
+      notify(`Could not update: ${(error as Error).message}`)
     }
-  };
+  }
 
   const handleDelete = async (id: string) => {
     try {
-      await deleteNotification(id);
-      setNotifications((curr) => curr.filter((n) => n.id !== id));
-      onChange();
+      await deleteNotification(id)
+      setNotifications((curr) => curr.filter((n) => n.id !== id))
+      onChange()
     } catch (error) {
-      notify(`Could not delete notification: ${(error as Error).message}`);
+      notify(`Could not delete notification: ${(error as Error).message}`)
     }
-  };
+  }
 
   const handleClearAll = async () => {
-    if (!window.confirm("Are you sure you want to clear all notifications?")) return;
+    if (!window.confirm("Are you sure you want to clear all notifications?"))
+      return
     try {
-      await clearNotifications();
-      await reload();
-      onChange();
-      notify("Notification list cleared.");
+      await clearNotifications()
+      await reload()
+      onChange()
+      notify("Notification list cleared.")
     } catch (error) {
-      notify(`Could not clear notifications: ${(error as Error).message}`);
+      notify(`Could not clear notifications: ${(error as Error).message}`)
     }
-  };
+  }
 
-  const columns = ["Type", "Title", "Message", "Date", "Actions"];
+  const columns = ["Type", "Title", "Message", "Date", "Actions"]
 
   const rows = notifications.map((n) => [
     <Pill key={`pill-${n.id}`} tone={n.type === "low_stock" ? "red" : "blue"}>
       {n.type === "low_stock" ? "Low Stock" : "Order"}
     </Pill>,
-    <span key={`title-${n.id}`} className={n.isRead ? "text-slate-600" : "font-bold text-slate-900"}>
+    <span
+      key={`title-${n.id}`}
+      className={n.isRead ? "text-slate-600" : "font-bold text-slate-900"}
+    >
       {n.title}
     </span>,
-    <span key={`msg-${n.id}`} className={n.isRead ? "text-slate-500" : "font-semibold text-slate-800"}>
+    <span
+      key={`msg-${n.id}`}
+      className={n.isRead ? "text-slate-500" : "font-semibold text-slate-800"}
+    >
       {n.message}
     </span>,
     formatDate(n.createdAt),
@@ -89,13 +105,33 @@ export function NotificationsPage({
       {n.type === "low_stock" && onReorder && (
         <button
           onClick={() => {
-            if (!n.isRead) handleMarkRead(n.id);
-            onReorder(n.message);
+            if (!n.isRead) handleMarkRead(n.id)
+            onReorder(n.message)
           }}
           className="btn-primary !h-7 !px-2.5 text-xs flex items-center gap-1"
           title="Create purchase stock order for this item"
         >
           <Icon name="plus" size={12} /> Reorder
+        </button>
+      )}
+
+      {n.type === "order" && onViewOrder && (
+        <button
+          onClick={async () => {
+            if (!n.isRead) await handleMarkRead(n.id)
+            const orderNumber = n.message.match(
+              /Order #(.+?) has been placed\./,
+            )?.[1]
+            if (orderNumber) {
+              onViewOrder(orderNumber)
+            } else {
+              notify("Could not find the order number in this notification.")
+            }
+          }}
+          className="btn-primary !h-7 !px-2.5 text-xs"
+          title="Open this customer order"
+        >
+          View Order
         </button>
       )}
 
@@ -117,7 +153,7 @@ export function NotificationsPage({
         <Icon name="trash" size={16} />
       </button>
     </div>,
-  ]);
+  ])
 
   return (
     <div className="space-y-5">
@@ -125,7 +161,10 @@ export function NotificationsPage({
         <h1 className="page-title">Notifications ({notifications.length})</h1>
         {notifications.length > 0 && (
           <div className="flex items-center gap-2">
-            <button className="btn-secondary !h-9 text-xs" onClick={handleMarkAllRead}>
+            <button
+              className="btn-secondary !h-9 text-xs"
+              onClick={handleMarkAllRead}
+            >
               Mark All Read
             </button>
             <button
@@ -145,5 +184,5 @@ export function NotificationsPage({
         emptyText="No notifications at this time."
       />
     </div>
-  );
+  )
 }

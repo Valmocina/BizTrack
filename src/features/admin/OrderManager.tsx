@@ -7,23 +7,29 @@ import { formatDate, formatPrice } from "@/services/format"
 import {
   archiveOrders,
   createOrder,
+  deleteArchivedOrder,
   listOrders,
   orderStatuses,
   restoreOrders,
+  updateOrderAssignee,
   updateOrderStatus,
 } from "@/services/orderService"
 import { listProducts } from "@/services/productService"
-import type { Notify, Order, Product } from "@/types"
+import { listProfiles } from "@/services/userService"
+import type { Notify, Order, Product, Profile } from "@/types"
 
 export function OrderManager({
   notify,
   canEdit,
+  initialOrderNumber = "",
 }: {
   notify: Notify
   canEdit: boolean
+  initialOrderNumber?: string
 }) {
   const orders = useLoad(listOrders, [] as Order[], notify, "orders")
   const products = useLoad(listProducts, [] as Product[], notify, "products")
+  const profiles = useLoad(listProfiles, [] as Profile[], notify, "users")
 
   const [recordView, setRecordView] = useState<"active" | "archived">("active")
   const [statusFilter, setStatusFilter] = useState("All statuses")
@@ -31,13 +37,29 @@ export function OrderManager({
   const [selectedProductId, setSelectedProductId] = useState<string>("")
   const [quantity, setQuantity] = useState<number>(1)
   const [unitPrice, setUnitPrice] = useState<number>(0)
+  const selectedProduct = products.data.find(
+    (product) => product.id === selectedProductId && (product.isActive ?? true),
+  )
+  const remainingStock = selectedProduct
+    ? selectedProduct.stock - quantity
+    : null
   const activeOrders = orders.data.filter((order) => !order.isArchived)
   const archivedOrders = orders.data.filter((order) => order.isArchived)
   const visibleOrders = (
     recordView === "active" ? activeOrders : archivedOrders
   ).filter(
-    (order) => statusFilter === "All statuses" || order.status === statusFilter,
+    (order) =>
+      (statusFilter === "All statuses" || order.status === statusFilter) &&
+      (!initialOrderNumber ||
+        order.orderNumber.toLowerCase() === initialOrderNumber.toLowerCase()),
   )
+
+  useEffect(() => {
+    if (initialOrderNumber) {
+      setRecordView("active")
+      setStatusFilter("All statuses")
+    }
+  }, [initialOrderNumber])
 
   useEffect(() => {
     if (!orders.loading && activeOrders.length >= 100) {
@@ -59,17 +81,65 @@ export function OrderManager({
     }
   }
 
+  const changeAssignee = async (order: Order, assignedTo: string) => {
+    const nextAssignee = assignedTo || null
+    try {
+      await updateOrderAssignee(order.id, nextAssignee)
+      orders.setData((current) =>
+        current.map((item) =>
+          item.id === order.id ? { ...item, assignedTo: nextAssignee } : item,
+        ),
+      )
+      notify(
+        nextAssignee
+          ? `Order ${order.orderNumber} assigned.`
+          : `Order ${order.orderNumber} is now unassigned.`,
+      )
+    } catch (error) {
+      notify(`Could not assign order: ${(error as Error).message}`)
+    }
+  }
+
+  const getAssigneeLabel = (profile: Profile) =>
+    profile.fullName
+      ? `${profile.fullName} (${profile.email})`
+      : `${profile.email}${profile.role === "admin" ? " - Admin" : ""}`
+
   const calculatedTotal = quantity * unitPrice
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     try {
+      if (!selectedProductId) {
+        notify("Select a product before saving the order.")
+        return
+      }
+      const currentProducts = await listProducts()
+      const currentProduct = currentProducts.find(
+        (product) =>
+          product.id === selectedProductId && (product.isActive ?? true),
+      )
+      if (!currentProduct) {
+        notify(
+          "This product is no longer available. Refresh the product selection.",
+        )
+        await products.reload()
+        return
+      }
+      if (quantity > currentProduct.stock) {
+        notify(
+          `Only ${currentProduct.stock} ${currentProduct.name} available. Reduce the quantity before saving.`,
+        )
+        await products.reload()
+        return
+      }
       await createOrder({
         customerName: String(form.get("customerName") || "Walk-in Customer"),
         productId: selectedProductId || null,
         quantity: quantity,
         total: calculatedTotal,
+        assignedTo: String(form.get("assignedTo") || "") || null,
       })
       notify("Order created successfully.")
       setShowForm(false)
@@ -121,6 +191,48 @@ export function OrderManager({
     }
   }
 
+  const handleArchiveOrder = async (order: Order) => {
+    if (
+      !window.confirm(
+        `Archive order ${order.orderNumber}? You can restore it from the Archived tab.`,
+      )
+    )
+      return
+    try {
+      await archiveOrders([order.id])
+      await orders.reload()
+      notify(`Order ${order.orderNumber} archived.`)
+    } catch (error) {
+      notify(`Could not archive order: ${(error as Error).message}`)
+    }
+  }
+
+  const handleRestoreOrder = async (order: Order) => {
+    try {
+      await restoreOrders([order.id])
+      await orders.reload()
+      notify(`Order ${order.orderNumber} restored.`)
+    } catch (error) {
+      notify(`Could not restore order: ${(error as Error).message}`)
+    }
+  }
+
+  const handleDeleteArchivedOrder = async (order: Order) => {
+    if (
+      !window.confirm(
+        `Permanently delete archived order ${order.orderNumber}? This cannot be undone.`,
+      )
+    )
+      return
+    try {
+      await deleteArchivedOrder(order.id)
+      await orders.reload()
+      notify(`Order ${order.orderNumber} permanently deleted.`)
+    } catch (error) {
+      notify(`Could not permanently delete order: ${(error as Error).message}`)
+    }
+  }
+
   const exportExcel = async () => {
     try {
       await downloadExcel("customer-orders.xlsx", "Customer Orders", [
@@ -131,6 +243,7 @@ export function OrderManager({
           "Qty",
           "Total Amount",
           "Date",
+          ...(canEdit ? ["Assigned To"] : []),
           "Status",
         ],
         ...visibleOrders.map((order) => [
@@ -173,6 +286,24 @@ export function OrderManager({
       o.quantity,
       formatPrice(o.total),
       formatDate(o.createdAt),
+      ...(canEdit
+        ? [
+            <select
+              value={o.assignedTo ?? ""}
+              disabled={o.isArchived || profiles.loading}
+              onChange={(event) => changeAssignee(o, event.target.value)}
+              className="input !h-9 !w-52 !py-0 text-sm"
+              aria-label={`Assign order ${o.orderNumber}`}
+            >
+              <option value="">Unassigned (admin handling)</option>
+              {profiles.data.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {getAssigneeLabel(profile)}
+                </option>
+              ))}
+            </select>,
+          ]
+        : []),
       <select
         value={o.status}
         disabled={isLocked || o.isArchived}
@@ -186,6 +317,40 @@ export function OrderManager({
           </option>
         ))}
       </select>,
+      ...(canEdit
+        ? [
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-amber-700 hover:text-amber-900"
+              onClick={() =>
+                o.isArchived ? handleRestoreOrder(o) : handleArchiveOrder(o)
+              }
+              aria-label={`${
+                o.isArchived ? "Restore" : "Archive"
+              } order ${o.orderNumber}`}
+              title={`${
+                o.isArchived ? "Restore" : "Archive"
+              } order ${o.orderNumber}`}
+            >
+              <Icon name={o.isArchived ? "eye" : "eyeoff"} size={16} />
+              {o.isArchived ? "Restore" : "Archive"}
+            </button>,
+            ...(o.isArchived
+              ? [
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 text-rose-700 hover:text-rose-900"
+                    onClick={() => handleDeleteArchivedOrder(o)}
+                    aria-label={`Permanently delete order ${o.orderNumber}`}
+                    title={`Permanently delete order ${o.orderNumber}`}
+                  >
+                    <Icon name="trash" size={16} />
+                    Delete
+                  </button>,
+                ]
+              : []),
+          ]
+        : []),
     ]
   })
 
@@ -282,6 +447,20 @@ export function OrderManager({
             <input name="customerName" placeholder="e.g. Walk-in Customer" />
           </label>
 
+          {canEdit && (
+            <label className="field">
+              <span>Assign to user (optional)</span>
+              <select name="assignedTo" defaultValue="">
+                <option value="">Unassigned (admin handling)</option>
+                {profiles.data.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {getAssigneeLabel(profile)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
           <label className="field">
             <span>Product</span>
             <select
@@ -292,24 +471,70 @@ export function OrderManager({
               <option value="" disabled>
                 Select product
               </option>
-              {products.data.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({formatPrice(p.price)})
-                </option>
-              ))}
+              {products.data
+                .filter((product) => product.isActive ?? true)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {p.stock} in stock ({formatPrice(p.price)})
+                  </option>
+                ))}
             </select>
           </label>
 
           <label className="field">
-            <span>Quantity</span>
+            <span>Quantity to order</span>
             <input
               type="number"
               min="1"
+              max={selectedProduct?.stock}
               value={quantity}
-              onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
+              onChange={(e) =>
+                setQuantity(
+                  Math.max(
+                    1,
+                    Math.min(
+                      Number(e.target.value) || 1,
+                      selectedProduct?.stock ?? Number.MAX_SAFE_INTEGER,
+                    ),
+                  ),
+                )
+              }
+              disabled={!selectedProduct || selectedProduct.stock <= 0}
+              aria-describedby="order-stock-availability"
               required
             />
           </label>
+
+          <div
+            id="order-stock-availability"
+            className={`flex flex-col justify-center rounded-lg border px-4 py-3 text-sm ${
+              !selectedProduct
+                ? "border-slate-200 bg-slate-50 text-slate-600"
+                : selectedProduct.stock <= 0
+                  ? "border-rose-200 bg-rose-50 text-rose-800"
+                  : remainingStock !== null && remainingStock < 0
+                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-800"
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            {selectedProduct ? (
+              <>
+                <span className="font-semibold">
+                  {selectedProduct.stock} available in stock
+                </span>
+                <span className="mt-1">
+                  {quantity} selected
+                  {remainingStock !== null && remainingStock >= 0
+                    ? ` · ${remainingStock} remaining`
+                    : ""}
+                </span>
+              </>
+            ) : (
+              <span>Select a product to see stock availability.</span>
+            )}
+          </div>
 
           <label className="field">
             <span>Unit Price</span>
@@ -348,6 +573,7 @@ export function OrderManager({
           "Total Amount",
           "Date",
           "Status",
+          ...(canEdit ? ["Actions"] : []),
         ]}
         rows={rows}
         loading={orders.loading}

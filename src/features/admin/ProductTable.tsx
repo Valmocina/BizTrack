@@ -5,9 +5,13 @@ import { Pill } from "@/components/ui/Pill"
 import { useLoad } from "@/hooks/useLoad"
 import { formatPrice } from "@/services/format"
 import {
+  archiveProduct,
+  archiveProducts,
   categoryTone,
-  deleteProduct,
+  deleteArchivedProduct,
   listProducts,
+  restoreProduct,
+  restoreProducts,
   stockStatus,
 } from "@/services/productService"
 import type { Notify, Product, StockStatus } from "@/types"
@@ -40,13 +44,22 @@ export function ProductTable({
   const [statusFilter, setStatusFilter] =
     useState<"All statuses" | StockStatus>("All statuses")
   const [categoryFilter, setCategoryFilter] = useState("All categories")
+  const [recordView, setRecordView] = useState<"active" | "archived">("active")
+
+  const activeProducts = items.filter((product) => product.isActive ?? true)
+  const archivedProducts = items.filter(
+    (product) => !(product.isActive ?? true),
+  )
 
   const categories = [
     ...new Set(
       items.map((product) => product.category.trim() || "Uncategorized"),
     ),
   ].sort((a, b) => a.localeCompare(b))
-  const filtered = items.filter((product) => {
+
+  const visibleProducts =
+    recordView === "active" ? activeProducts : archivedProducts
+  const filtered = visibleProducts.filter((product) => {
     const category = product.category.trim() || "Uncategorized"
     return (
       `${product.name} ${product.sku} ${product.category}`
@@ -58,15 +71,113 @@ export function ProductTable({
     )
   })
 
-  const remove = async (product: Product) => {
-    if (!window.confirm(`Delete ${product.name}? This cannot be undone.`))
+  const archive = async (product: Product) => {
+    if (!window.confirm(`Archive ${product.name}?`)) return
+    try {
+      await archiveProduct(product.id)
+      setItems((current) =>
+        current.map((p) =>
+          p.id === product.id ? { ...p, isActive: false } : p,
+        ),
+      )
+      notify(`${product.name} was archived.`)
+    } catch (error) {
+      notify(`Could not archive: ${(error as Error).message}`)
+    }
+  }
+
+  const restore = async (product: Product) => {
+    if (!window.confirm(`Restore ${product.name}?`)) return
+    try {
+      await restoreProduct(product.id)
+      setItems((current) =>
+        current.map((p) =>
+          p.id === product.id ? { ...p, isActive: true } : p,
+        ),
+      )
+      notify(`${product.name} was restored.`)
+    } catch (error) {
+      notify(`Could not restore: ${(error as Error).message}`)
+    }
+  }
+
+  const archiveVisible = async () => {
+    if (
+      !window.confirm(
+        `Archive these ${filtered.length} products? You can restore them from the Archived tab.`,
+      )
+    )
+      return
+
+    try {
+      await archiveProducts(filtered.map((product) => product.id))
+      const archivedIds = new Set(filtered.map((product) => product.id))
+      setItems((current) =>
+        current.map((product) =>
+          archivedIds.has(product.id)
+            ? { ...product, isActive: false }
+            : product,
+        ),
+      )
+      notify("Products were archived.")
+    } catch (error) {
+      notify(`Could not archive products: ${(error as Error).message}`)
+    }
+  }
+
+  const restoreVisible = async () => {
+    try {
+      await restoreProducts(filtered.map((product) => product.id))
+      const restoredIds = new Set(filtered.map((product) => product.id))
+      setItems((current) =>
+        current.map((product) =>
+          restoredIds.has(product.id)
+            ? { ...product, isActive: true }
+            : product,
+        ),
+      )
+      notify("Products were restored.")
+    } catch (error) {
+      notify(`Could not restore products: ${(error as Error).message}`)
+    }
+  }
+
+  const deleteToArchive = async (product: Product) => {
+    if (
+      !window.confirm(
+        `Move ${product.name} to Archived? You can restore it later.`,
+      )
+    )
+      return
+
+    try {
+      await archiveProduct(product.id)
+      setItems((current) =>
+        current.map((p) =>
+          p.id === product.id ? { ...p, isActive: false } : p,
+        ),
+      )
+      notify(`${product.name} was moved to Archived.`)
+    } catch (error) {
+      notify(`Could not archive: ${(error as Error).message}`)
+    }
+  }
+
+  const permanentlyDelete = async (product: Product) => {
+    if (
+      !window.confirm(
+        `Permanently delete archived product ${product.name}? This cannot be undone. Linked supplier records and inventory history may also be removed.`,
+      )
+    )
       return
     try {
-      await deleteProduct(product.id)
-      setItems((current) => current.filter((p) => p.id !== product.id))
-      notify(`${product.name} was deleted.`)
+      await deleteArchivedProduct(product.id)
+      setItems((current) => current.filter((item) => item.id !== product.id))
+      notify(`${product.name} was permanently deleted.`)
     } catch (error) {
-      notify(`Could not delete: ${(error as Error).message}`)
+      notify(
+        `Could not permanently delete product: ${(error as Error).message}`,
+      )
     }
   }
 
@@ -136,12 +247,49 @@ export function ProductTable({
                 <Icon name="edit" size={18} />
               </button>
               <button
-                onClick={() => remove(p)}
-                className="hover:text-rose-600"
-                aria-label={`Delete ${p.name}`}
+                onClick={() => (p.isActive === false ? restore(p) : archive(p))}
+                className={`inline-flex items-center gap-1 ${
+                  p.isActive === false
+                    ? "hover:text-emerald-600"
+                    : "hover:text-amber-600"
+                }`}
+                aria-label={
+                  p.isActive === false
+                    ? `Restore ${p.name}`
+                    : `Archive ${p.name}`
+                }
+                title={
+                  p.isActive === false
+                    ? `Restore ${p.name}`
+                    : `Archive ${p.name}`
+                }
               >
-                <Icon name="trash" size={18} />
+                <Icon
+                  name={p.isActive === false ? "eye" : "eyeoff"}
+                  size={18}
+                />
+                <span>{p.isActive === false ? "Restore" : "Archive"}</span>
               </button>
+              {p.isActive === false ? (
+                <button
+                  onClick={() => permanentlyDelete(p)}
+                  className="inline-flex items-center gap-1 text-rose-700 hover:text-rose-900"
+                  aria-label={`Permanently delete ${p.name}`}
+                  title={`Permanently delete ${p.name}`}
+                >
+                  <Icon name="trash" size={18} />
+                  <span>Delete</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => deleteToArchive(p)}
+                  className="hover:text-rose-600"
+                  aria-label={`Delete ${p.name}`}
+                  title={`Move ${p.name} to Archived`}
+                >
+                  <Icon name="trash" size={18} />
+                </button>
+              )}
             </div>,
           ]
         : []),
@@ -161,48 +309,82 @@ export function ProductTable({
             placeholder="Search products..."
           />
         </label>
-        {canEdit && (
-          <button className="btn-primary" onClick={onAdd}>
-            <Icon name="plus" size={16} /> Add Product
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {canEdit && recordView === "active" && filtered.length > 0 && (
+            <button className="btn-secondary" onClick={archiveVisible}>
+              Archive ({filtered.length})
+            </button>
+          )}
+          {canEdit && recordView === "archived" && filtered.length > 0 && (
+            <button className="btn-secondary" onClick={restoreVisible}>
+              Restore ({filtered.length})
+            </button>
+          )}
+          {canEdit && (
+            <button className="btn-primary" onClick={onAdd}>
+              <Icon name="plus" size={16} /> Add Product
+            </button>
+          )}
+        </div>
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="field !mb-0 flex-row items-center gap-2">
-          <span>Status</span>
-          <select
-            value={statusFilter}
-            onChange={(event) => {
-              const value = event.target.value
-              setStatusFilter(
-                value === "In Stock" ||
-                  value === "Low Stock" ||
-                  value === "Out of Stock"
-                  ? value
-                  : "All statuses",
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="field !mb-0 flex-row items-center gap-2">
+            <span>Status</span>
+            <select
+              value={statusFilter}
+              onChange={(event) => {
+                const value = event.target.value
+                setStatusFilter(
+                  value === "In Stock" ||
+                    value === "Low Stock" ||
+                    value === "Out of Stock"
+                    ? value
+                    : "All statuses",
+                )
+              }}
+              className="!h-10 !w-auto"
+            >
+              <option>All statuses</option>
+              <option>In Stock</option>
+              <option>Low Stock</option>
+              <option>Out of Stock</option>
+            </select>
+          </label>
+          <label className="field !mb-0 flex-row items-center gap-2">
+            <span>Category</span>
+            <select
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value)}
+              className="!h-10 !w-auto"
+            >
+              <option>All categories</option>
+              {categories.map((category) => (
+                <option key={category}>{category}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="flex overflow-hidden rounded-md border border-[#e5ebf3] bg-white">
+          {(["active", "archived"] as const).map((view) => (
+            <button
+              key={view}
+              type="button"
+              onClick={() => setRecordView(view)}
+              className={`px-3 py-2 text-sm font-medium transition ${
+                recordView === view
+                  ? "bg-slate-800 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              {view === "active" ? "Active" : "Archived"} (
+              {view === "active"
+                ? activeProducts.length
+                : archivedProducts.length}
               )
-            }}
-            className="!h-10 !w-auto"
-          >
-            <option>All statuses</option>
-            <option>In Stock</option>
-            <option>Low Stock</option>
-            <option>Out of Stock</option>
-          </select>
-        </label>
-        <label className="field !mb-0 flex-row items-center gap-2">
-          <span>Category</span>
-          <select
-            value={categoryFilter}
-            onChange={(event) => setCategoryFilter(event.target.value)}
-            className="!h-10 !w-auto"
-          >
-            <option>All categories</option>
-            {categories.map((category) => (
-              <option key={category}>{category}</option>
-            ))}
-          </select>
-        </label>
+            </button>
+          ))}
+        </div>
       </div>
       <DataTable
         columns={columns}

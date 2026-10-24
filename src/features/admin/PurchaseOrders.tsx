@@ -7,6 +7,7 @@ import { formatDate, formatPrice } from "@/services/format"
 import {
   archivePurchaseOrders,
   createPurchaseOrder,
+  deleteArchivedPurchaseOrder,
   listPurchaseOrders,
   poStatuses,
   restorePurchaseOrders,
@@ -178,6 +179,50 @@ export function PurchaseOrders({
     }
   }
 
+  const handleArchiveOrder = async (order: PurchaseOrder) => {
+    if (
+      !window.confirm(
+        `Archive purchase stock record ${order.poNumber}? You can restore it from the Archived tab.`,
+      )
+    )
+      return
+    try {
+      await archivePurchaseOrders([order.id])
+      await pos.reload()
+      notify(`Purchase stock record ${order.poNumber} archived.`)
+    } catch (error) {
+      notify(`Could not archive purchase stock: ${(error as Error).message}`)
+    }
+  }
+
+  const handleRestoreOrder = async (order: PurchaseOrder) => {
+    try {
+      await restorePurchaseOrders([order.id])
+      await pos.reload()
+      notify(`Purchase stock record ${order.poNumber} restored.`)
+    } catch (error) {
+      notify(`Could not restore purchase stock: ${(error as Error).message}`)
+    }
+  }
+
+  const handleDeleteArchivedOrder = async (order: PurchaseOrder) => {
+    if (
+      !window.confirm(
+        `Permanently delete archived purchase stock record ${order.poNumber}? This cannot be undone.`,
+      )
+    )
+      return
+    try {
+      await deleteArchivedPurchaseOrder(order.id)
+      await pos.reload()
+      notify(`Purchase stock record ${order.poNumber} permanently deleted.`)
+    } catch (error) {
+      notify(
+        `Could not permanently delete purchase stock: ${(error as Error).message}`,
+      )
+    }
+  }
+
   const exportExcel = async () => {
     try {
       await downloadExcel("purchase-stock.xlsx", "Purchase Stock", [
@@ -242,6 +287,40 @@ export function PurchaseOrders({
           </option>
         ))}
       </select>,
+      ...(canEdit
+        ? [
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-amber-700 hover:text-amber-900"
+              onClick={() =>
+                p.isArchived ? handleRestoreOrder(p) : handleArchiveOrder(p)
+              }
+              aria-label={`${
+                p.isArchived ? "Restore" : "Archive"
+              } purchase stock record ${p.poNumber}`}
+              title={`${
+                p.isArchived ? "Restore" : "Archive"
+              } purchase stock record ${p.poNumber}`}
+            >
+              <Icon name={p.isArchived ? "eye" : "eyeoff"} size={16} />
+              {p.isArchived ? "Restore" : "Archive"}
+            </button>,
+            ...(p.isArchived
+              ? [
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 text-rose-700 hover:text-rose-900"
+                    onClick={() => handleDeleteArchivedOrder(p)}
+                    aria-label={`Permanently delete purchase stock record ${p.poNumber}`}
+                    title={`Permanently delete purchase stock record ${p.poNumber}`}
+                  >
+                    <Icon name="trash" size={16} />
+                    Delete
+                  </button>,
+                ]
+              : []),
+          ]
+        : []),
     ]
   })
 
@@ -440,6 +519,7 @@ export function PurchaseOrders({
           "Amount",
           "Expected Date",
           "Status",
+          ...(canEdit ? ["Actions"] : []),
         ]}
         rows={rows}
         loading={pos.loading}

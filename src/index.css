@@ -16,6 +16,10 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: #f4f7fb; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 3px solid rgb(37 99 235 / 0.55);
+  outline-offset: 2px;
+}
 
 /* White panel used for tables, forms and dashboard cards */
 .card { background: #fff; border: 1px solid #e5ebf3; border-radius: 12px; }
@@ -34,7 +38,7 @@ button:disabled { cursor: not-allowed; }
 
 /* Headings */
 .page-title { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; color: #1f2d3f; }
-.page-description { margin: 6px 0 0; font-size: 14px; color: #8493a8; }
+.page-description { margin: 6px 0 0; font-size: 15px; line-height: 1.5; color: #526176; }
 .section-title { margin: 0; font-size: 18px; font-weight: 700; color: #1f2d3f; }
 
 /* Form controls */
@@ -42,10 +46,10 @@ button:disabled { cursor: not-allowed; }
 .field > span { font-size: 14px; font-weight: 700; color: #1f2d3f; }
 .input, .field input, .field select, .field textarea {
   width: 100%; height: 46px; padding: 0 14px; border: 1px solid #e5ebf3; border-radius: 8px;
-  background: #fff; font-size: 14px; color: #1f2d3f; outline: none;
+  background: #fff; font-size: 15px; color: #1f2d3f; outline: none;
 }
 .field textarea { height: auto; padding: 12px 14px; resize: vertical; }
 .input:focus, .field input:focus, .field select:focus, .field textarea:focus {
   border-color: #3b82f6; box-shadow: 0 0 0 3px rgb(59 130 246 / 0.15);
 }
-.input::placeholder, .field input::placeholder, .field textarea::placeholder { color: #94a3b8; }
+.input::placeholder, .field input::placeholder, .field textarea::placeholder { color: #64748b; opacity: 1; }

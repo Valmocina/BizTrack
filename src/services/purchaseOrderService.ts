@@ -41,6 +41,20 @@ export async function restorePurchaseOrders(ids: string[]): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
+export async function deleteArchivedPurchaseOrder(id: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("purchase_orders")
+    .delete()
+    .eq("id", id)
+    .eq("is_archived", true)
+    .select("id")
+  if (error) throw new Error(error.message)
+  if (!data?.length)
+    throw new Error(
+      "Only archived purchase stock records can be permanently deleted.",
+    )
+}
+
 export async function listPurchaseOrders(): Promise<PurchaseOrder[]> {
   const { data, error } = await supabase
     .from("purchase_orders")

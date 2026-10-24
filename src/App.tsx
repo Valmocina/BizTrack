@@ -57,6 +57,7 @@ function Shell() {
   const [productQuery, setProductQuery] = useState("")
   const [unread, setUnread] = useState(0)
   const [reorderProduct, setReorderProduct] = useState<string>("")
+  const [targetOrderNumber, setTargetOrderNumber] = useState<string>("")
 
   // Sync state changes with localStorage whenever the active view changes
   useEffect(() => {
@@ -102,10 +103,11 @@ function Shell() {
   }, [notify, refreshUnread])
 
   // Navigate to a page (leaving a search, edit, or target reorder product behind)
-  const goTo = (page: string, targetProduct?: string) => {
+  const goTo = (page: string, targetProduct?: string, orderNumber?: string) => {
     setEditing(null)
     setProductQuery("")
     setReorderProduct(targetProduct || "")
+    setTargetOrderNumber(orderNumber || "")
     setActive(page)
   }
 
@@ -138,7 +140,13 @@ function Shell() {
       content = <AddProduct product={editing} notify={notify} goTo={goTo} />
       break
     case "Orders":
-      content = <OrderManager notify={notify} canEdit={isAdmin} />
+      content = (
+        <OrderManager
+          notify={notify}
+          canEdit={isAdmin}
+          initialOrderNumber={targetOrderNumber}
+        />
+      )
       break
     case "Purchase Stock":
       content = (
@@ -158,6 +166,7 @@ function Shell() {
           notify={notify}
           onChange={refreshUnread}
           onReorder={(productName) => goTo("Purchase Stock", productName)}
+          onViewOrder={(orderNumber) => goTo("Orders", undefined, orderNumber)}
         />
       )
       break

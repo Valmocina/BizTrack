@@ -5,7 +5,7 @@ export async function listSuppliers(): Promise<Supplier[]> {
   const { data, error } = await supabase
     .from("suppliers")
     .select(`
-      id, name, contact_email, category, status,
+      id, name, contact_email, category, status, is_archived,
       supplier_products (
         id, supplier_id, product_id, unit_price,
         products ( name )
@@ -26,6 +26,7 @@ export async function listSuppliers(): Promise<Supplier[]> {
     contactEmail: s.contact_email ?? "",
     category: s.category ?? "General",
     status: s.status ?? "Active",
+    isArchived: s.is_archived,
     products: Array.isArray(s.supplier_products)
       ? s.supplier_products.map((sp: any) => {
           const prod = Array.isArray(sp.products) ? sp.products[0] : sp.products;
@@ -112,9 +113,34 @@ export async function addSupplier(input: {
   }
 }
 
-export async function deleteSupplier(id: string): Promise<void> {
-  const { error } = await supabase.from("suppliers").delete().eq("id", id);
+export async function archiveSuppliers(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  const { error } = await supabase
+    .from("suppliers")
+    .update({ is_archived: true })
+    .in("id", ids)
+  if (error) throw new Error(error.message)
+}
+
+export async function restoreSuppliers(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  const { error } = await supabase
+    .from("suppliers")
+    .update({ is_archived: false })
+    .in("id", ids)
+  if (error) throw new Error(error.message)
+}
+
+export async function deleteArchivedSupplier(id: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("suppliers")
+    .delete()
+    .eq("id", id)
+    .eq("is_archived", true)
+    .select("id")
+
   if (error) throw new Error(error.message);
+  if (!data?.length) throw new Error("Only archived suppliers can be permanently deleted.")
 }
 
 export async function linkProductToSupplier(input: {

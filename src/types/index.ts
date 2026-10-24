@@ -30,8 +30,10 @@ export type Product = {
   price: number
   cost?: number
   supplierName?: string
+  hasSupplier?: boolean
   stock: number
   lowStockAlert: number
+  isActive?: boolean
   createdAt: string
 }
 
@@ -67,6 +69,7 @@ export type Supplier = {
   contactEmail: string
   category: string
   status: string
+  isArchived: boolean
   products?: SupplierProduct[]
 }
 
@@ -88,11 +91,16 @@ export type TxType = "IN" | "OUT" | "ADJUST"
 
 export type InventoryTransaction = {
   id: string
+  productId: string
   productName: string
   type: TxType
   quantity: number
   reference: string
   remarks: string
+  previousStock: number | null
+  newStock: number | null
+  createdBy: string | null
+  createdByName?: string
   isArchived: boolean
   createdAt: string
 }

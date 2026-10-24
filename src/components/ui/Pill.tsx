@@ -2,13 +2,13 @@
 import type { ReactNode } from "react";
 
 export const pillTone = {
-  green: "bg-[#d6f5e5] text-[#16a36b]",
-  red: "bg-[#ffe0e4] text-[#ee4a5a]",
-  orange: "bg-[#ffeacc] text-[#f0971c]",
-  blue: "bg-[#dbeafe] text-[#2563eb]",
-  gray: "bg-slate-100 text-slate-500",
+  green: "bg-emerald-100 text-emerald-800",
+  red: "bg-rose-100 text-rose-800",
+  orange: "bg-amber-100 text-amber-800",
+  blue: "bg-blue-100 text-blue-800",
+  gray: "bg-slate-100 text-slate-700",
 };
 
 export function Pill({ tone, children }: { tone: keyof typeof pillTone; children: ReactNode }) {
-  return <span className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-bold ${pillTone[tone]}`}>{children}</span>;
+  return <span className={`inline-flex items-center gap-1 rounded px-2.5 py-1 text-xs font-bold ${pillTone[tone]}`}>{children}</span>;
 }

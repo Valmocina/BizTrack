@@ -1,4 +1,5 @@
 // Admin home: KPI cards, inventory movement chart, product categories, recent notifications/transactions and quick actions.
+import { useState } from "react"
 import { Icon } from "@/components/ui/Icon"
 import { NotificationIcon } from "@/components/ui/NotificationIcon"
 import { StatCard } from "@/components/ui/StatCard"
@@ -11,7 +12,7 @@ import { listNotifications } from "@/services/notificationService"
 import { isOpenOrder, listOrders } from "@/services/orderService"
 import { listProducts, stockStatus } from "@/services/productService"
 import { listPurchaseOrders } from "@/services/purchaseOrderService"
-import { timeAgo } from "@/services/format"
+import { formatPrice, timeAgo } from "@/services/format"
 import type { IconName, Notify } from "@/types"
 
 const donutColors = [
@@ -32,6 +33,9 @@ export function AdminDashboard({
   notify: Notify
 }) {
   const { user } = useAuth()
+  const [dashboardTab, setDashboardTab] = useState<"overview" | "revenue">(
+    "overview",
+  )
   const { data, loading } = useLoad(
     async () => {
       const [products, orders, pos, notifications, transactions] =
@@ -71,6 +75,14 @@ export function AdminDashboard({
       p.status !== "Cancelled" &&
       p.status !== "Closed",
   )
+  const totalRevenue = orders
+    .filter((order) => order.status === "Completed")
+    .reduce((total, order) => total + order.total, 0)
+  const totalSpent = pos
+    .filter((purchaseOrder) => purchaseOrder.status === "Received")
+    .reduce((total, purchaseOrder) => total + purchaseOrder.amount, 0)
+  const netProfit = totalRevenue - totalSpent
+  const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0
 
   // Product categories donut: top 4 categories + "Other"
   const counts = new Map<string, number>()
@@ -135,179 +147,270 @@ export function AdminDashboard({
         </p>
       </div>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          icon="box"
-          tint="bg-blue-100 text-blue-500"
-          label="Total Products"
-          value={products.length}
-          change={`${products.filter((p) => isNew(p.createdAt)).length} new`}
-          note="this week"
-        />
-        <StatCard
-          icon="alert"
-          tint="bg-red-100 text-red-500"
-          label="Low Stock Items"
-          value={lowStock.length}
-          change={`${outOfStock} out of stock`}
-          warn
-        />
-        <StatCard
-          icon="cart"
-          tint="bg-emerald-100 text-emerald-500"
-          label="Pending Orders"
-          value={openOrders.length}
-          change={`${orders.filter((o) => isNew(o.createdAt)).length} new`}
-          note="this week"
-        />
-        <StatCard
-          icon="file"
-          tint="bg-purple-100 text-purple-500"
-          label="Pending P.O."
-          value={openPos.length}
-          change={`${pos.filter((p) => isNew(p.createdAt)).length} new`}
-          note="this week"
-        />
-      </section>
+      <div className="flex w-fit gap-1 rounded-lg border border-slate-200 bg-white p-1">
+        {(["overview", "revenue"] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            aria-pressed={dashboardTab === tab}
+            onClick={() => setDashboardTab(tab)}
+            className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
+              dashboardTab === tab
+                ? "bg-slate-800 text-white"
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            {tab === "overview" ? "Overview" : "Revenue"}
+          </button>
+        ))}
+      </div>
 
-      <section className="grid gap-5 xl:grid-cols-[1.8fr_1fr_1fr]">
-        <article className="card p-6">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="section-title">Inventory Movement</h2>
-            <div className="flex gap-4 text-xs text-slate-600">
-              {[
-                ["In", "bg-emerald-500"],
-                ["Out", "bg-blue-600"],
-                ["Adjust", "bg-amber-500"],
-              ].map(([label, color]) => (
-                <span key={label} className="flex items-center gap-1.5">
-                  <span className={`h-2 w-2 rounded-full ${color}`} />
-                  {label}
-                </span>
-              ))}
-            </div>
+      {dashboardTab === "revenue" ? (
+        <section className="space-y-5">
+          <div>
+            <h2 className="section-title">Revenue summary</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              All-time totals from completed customer orders and received
+              purchase orders.
+            </p>
           </div>
-          <MovementChart transactions={activeTransactions} />
-        </article>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <article className="card border-l-4 border-l-emerald-500 p-5">
+              <p className="text-sm font-semibold text-slate-600">
+                Total earned
+              </p>
+              <p className="mt-2 text-3xl font-bold tracking-tight text-emerald-800">
+                {formatPrice(totalRevenue)}
+              </p>
+              <p className="mt-2 text-sm text-slate-600">
+                {orders.filter((order) => order.status === "Completed").length}{" "}
+                completed customer orders
+              </p>
+            </article>
+            <article className="card border-l-4 border-l-rose-500 p-5">
+              <p className="text-sm font-semibold text-slate-600">
+                Total spent
+              </p>
+              <p className="mt-2 text-3xl font-bold tracking-tight text-rose-800">
+                {formatPrice(totalSpent)}
+              </p>
+              <p className="mt-2 text-sm text-slate-600">
+                {
+                  pos.filter(
+                    (purchaseOrder) => purchaseOrder.status === "Received",
+                  ).length
+                }{" "}
+                received purchase orders
+              </p>
+            </article>
+            <article className="card border-l-4 border-l-blue-500 p-5">
+              <p className="text-sm font-semibold text-slate-600">Net</p>
+              <p
+                className={`mt-2 text-3xl font-bold tracking-tight ${
+                  netProfit >= 0 ? "text-blue-800" : "text-rose-800"
+                }`}
+              >
+                {formatPrice(netProfit)}
+              </p>
+              <p className="mt-2 text-sm text-slate-600">Earned minus spent</p>
+            </article>
+            <article className="card border-l-4 border-l-violet-500 p-5">
+              <p className="text-sm font-semibold text-slate-600">
+                Profit margin
+              </p>
+              <p className="mt-2 text-3xl font-bold tracking-tight text-violet-800">
+                {profitMargin.toFixed(1)}%
+              </p>
+              <p className="mt-2 text-sm text-slate-600">
+                Net as a share of earned revenue
+              </p>
+            </article>
+          </div>
+          {loading && (
+            <p className="text-sm text-slate-600" role="status">
+              Updating revenue totals...
+            </p>
+          )}
+        </section>
+      ) : (
+        <>
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              icon="box"
+              tint="bg-blue-100 text-blue-500"
+              label="Total Products"
+              value={products.length}
+              change={`${products.filter((p) => isNew(p.createdAt)).length} new`}
+              note="this week"
+            />
+            <StatCard
+              icon="alert"
+              tint="bg-red-100 text-red-500"
+              label="Low Stock Items"
+              value={lowStock.length}
+              change={`${outOfStock} out of stock`}
+              warn
+            />
+            <StatCard
+              icon="cart"
+              tint="bg-emerald-100 text-emerald-500"
+              label="Pending Orders"
+              value={openOrders.length}
+              change={`${orders.filter((o) => isNew(o.createdAt)).length} new`}
+              note="this week"
+            />
+            <StatCard
+              icon="file"
+              tint="bg-purple-100 text-purple-500"
+              label="Pending P.O."
+              value={openPos.length}
+              change={`${pos.filter((p) => isNew(p.createdAt)).length} new`}
+              note="this week"
+            />
+          </section>
 
-        <article className="card p-6">
-          <h2 className="section-title">Product Categories</h2>
-          <div className="mt-5 flex flex-col items-center gap-5 sm:flex-row xl:flex-col 2xl:flex-row">
-            <div
-              className="relative h-[140px] w-[140px] shrink-0 rounded-full"
-              style={{ background: gradient }}
-            >
-              <div className="absolute inset-[16px] grid place-items-center rounded-full bg-white text-center">
-                <div>
-                  <strong className="block text-2xl text-slate-800">
-                    {total}
-                  </strong>
-                  <span className="text-[10px] text-slate-400">
-                    Total Products
-                  </span>
+          <section className="grid gap-5 xl:grid-cols-[1.8fr_1fr_1fr]">
+            <article className="card p-6">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="section-title">Inventory Movement</h2>
+                <div className="flex gap-4 text-xs text-slate-600">
+                  {[
+                    ["In", "bg-emerald-500"],
+                    ["Out", "bg-blue-600"],
+                    ["Adjust", "bg-amber-500"],
+                  ].map(([label, color]) => (
+                    <span key={label} className="flex items-center gap-1.5">
+                      <span className={`h-2 w-2 rounded-full ${color}`} />
+                      {label}
+                    </span>
+                  ))}
                 </div>
               </div>
-            </div>
-            <ul className="w-full space-y-2.5 text-xs">
-              {slices.map(([label, n], i) => (
-                <li key={label} className="flex items-center gap-2">
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ background: donutColors[i] }}
-                  />
-                  <span className="truncate text-slate-600">{label}</span>
-                  <span className="ml-auto font-semibold text-slate-700">
-                    {n}
-                  </span>
-                  <span className="w-9 text-right text-slate-400">
-                    {Math.round((n / total) * 100)}%
-                  </span>
-                </li>
-              ))}
-              {!slices.length && (
-                <li className="text-slate-400">No products yet.</li>
-              )}
-            </ul>
-          </div>
-        </article>
+              <MovementChart transactions={activeTransactions} />
+            </article>
 
-        <article className="card p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="section-title">Recent Notifications</h2>
-            <button
-              onClick={() => goTo("Notifications")}
-              className="text-xs font-semibold text-blue-600 hover:underline"
-            >
-              View all →
-            </button>
-          </div>
-          <ul className="mt-4 space-y-4">
-            {notifications.slice(0, 4).map((n) => (
-              <li key={n.id} className="flex items-start gap-3">
-                <NotificationIcon type={n.type} size={18} box={40} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold text-slate-800">{n.title}</p>
-                  <p className="text-[11px] text-slate-400">{n.message}</p>
+            <article className="card p-6">
+              <h2 className="section-title">Product Categories</h2>
+              <div className="mt-5 flex flex-col items-center gap-5 sm:flex-row xl:flex-col 2xl:flex-row">
+                <div
+                  className="relative h-[140px] w-[140px] shrink-0 rounded-full"
+                  style={{ background: gradient }}
+                >
+                  <div className="absolute inset-[16px] grid place-items-center rounded-full bg-white text-center">
+                    <div>
+                      <strong className="block text-2xl text-slate-800">
+                        {total}
+                      </strong>
+                      <span className="text-[10px] text-slate-400">
+                        Total Products
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <span className="shrink-0 text-[10px] text-slate-400">
-                  {timeAgo(n.createdAt)}
-                </span>
-              </li>
-            ))}
-            {!notifications.length && (
-              <li className="py-6 text-center text-xs text-slate-400">
-                {loading ? "Loading..." : "No notifications yet."}
-              </li>
-            )}
-          </ul>
-        </article>
-      </section>
+                <ul className="w-full space-y-2.5 text-xs">
+                  {slices.map(([label, n], i) => (
+                    <li key={label} className="flex items-center gap-2">
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ background: donutColors[i] }}
+                      />
+                      <span className="truncate text-slate-600">{label}</span>
+                      <span className="ml-auto font-semibold text-slate-700">
+                        {n}
+                      </span>
+                      <span className="w-9 text-right text-slate-400">
+                        {Math.round((n / total) * 100)}%
+                      </span>
+                    </li>
+                  ))}
+                  {!slices.length && (
+                    <li className="text-slate-400">No products yet.</li>
+                  )}
+                </ul>
+              </div>
+            </article>
 
-      <section className="grid gap-5 xl:grid-cols-[2.2fr_1fr_1fr]">
-        <div>
-          <h2 className="section-title mb-3">Recent Transactions</h2>
-          <TransactionTable
-            transactions={activeTransactions.slice(0, 5)}
-            loading={loading}
-          />
-        </div>
-        <article className="card p-6">
-          <h2 className="section-title">Quick Actions</h2>
-          <div className="mt-4 space-y-3">
-            {actions.map(([icon, label, page]) => (
+            <article className="card p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="section-title">Recent Notifications</h2>
+                <button
+                  onClick={() => goTo("Notifications")}
+                  className="text-xs font-semibold text-blue-600 hover:underline"
+                >
+                  View all →
+                </button>
+              </div>
+              <ul className="mt-4 space-y-4">
+                {notifications.slice(0, 4).map((n) => (
+                  <li key={n.id} className="flex items-start gap-3">
+                    <NotificationIcon type={n.type} size={18} box={40} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-slate-800">
+                        {n.title}
+                      </p>
+                      <p className="text-[11px] text-slate-400">{n.message}</p>
+                    </div>
+                    <span className="shrink-0 text-[10px] text-slate-400">
+                      {timeAgo(n.createdAt)}
+                    </span>
+                  </li>
+                ))}
+                {!notifications.length && (
+                  <li className="py-6 text-center text-xs text-slate-400">
+                    {loading ? "Loading..." : "No notifications yet."}
+                  </li>
+                )}
+              </ul>
+            </article>
+          </section>
+
+          <section className="grid gap-5 xl:grid-cols-[2.2fr_1fr_1fr]">
+            <div>
+              <h2 className="section-title mb-3">Recent Transactions</h2>
+              <TransactionTable
+                transactions={activeTransactions.slice(0, 5)}
+                loading={loading}
+              />
+            </div>
+            <article className="card p-6">
+              <h2 className="section-title">Quick Actions</h2>
+              <div className="mt-4 space-y-3">
+                {actions.map(([icon, label, page]) => (
+                  <button
+                    key={label}
+                    onClick={() => goTo(page)}
+                    className="flex w-full items-center gap-3 rounded-md border border-[#dbe5f2] bg-[#f7f9fc] p-1.5 text-left text-xs font-bold text-slate-800 hover:bg-white"
+                  >
+                    <span className="grid h-8 w-8 place-items-center rounded bg-[#1f4f9e] text-white">
+                      <Icon name={icon} size={16} />
+                    </span>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </article>
+            <article className="card flex flex-col items-center p-6 text-center">
+              {/* Placeholder for the illustration */}
+              <div
+                className="mb-5 h-28 w-full rounded-lg bg-[#eef3fa]"
+                aria-hidden="true"
+              />
+              <h2 className="text-base font-bold text-slate-800">
+                Stay on top of your inventory
+              </h2>
+              <p className="mt-2 text-xs text-slate-400">
+                Track, manage and grow your business with BizTrack.
+              </p>
               <button
-                key={label}
-                onClick={() => goTo(page)}
-                className="flex w-full items-center gap-3 rounded-md border border-[#dbe5f2] bg-[#f7f9fc] p-1.5 text-left text-xs font-bold text-slate-800 hover:bg-white"
+                onClick={() => goTo("Settings")}
+                className="btn-primary mt-5 !h-11 w-full max-w-[180px] !text-[13px]"
               >
-                <span className="grid h-8 w-8 place-items-center rounded bg-[#1f4f9e] text-white">
-                  <Icon name={icon} size={16} />
-                </span>
-                {label}
+                Customize Dashboard
               </button>
-            ))}
-          </div>
-        </article>
-        <article className="card flex flex-col items-center p-6 text-center">
-          {/* Placeholder for the illustration */}
-          <div
-            className="mb-5 h-28 w-full rounded-lg bg-[#eef3fa]"
-            aria-hidden="true"
-          />
-          <h2 className="text-base font-bold text-slate-800">
-            Stay on top of your inventory
-          </h2>
-          <p className="mt-2 text-xs text-slate-400">
-            Track, manage and grow your business with BizTrack.
-          </p>
-          <button
-            onClick={() => goTo("Settings")}
-            className="btn-primary mt-5 !h-11 w-full max-w-[180px] !text-[13px]"
-          >
-            Customize Dashboard
-          </button>
-        </article>
-      </section>
+            </article>
+          </section>
+        </>
+      )}
     </div>
   )
 }
