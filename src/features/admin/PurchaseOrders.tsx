@@ -3,13 +3,14 @@ import { DataTable } from "@/components/ui/DataTable"
 import { Icon } from "@/components/ui/Icon"
 import { useLoad } from "@/hooks/useLoad"
 import { downloadExcel } from "@/services/excel"
-import { formatDate, formatPrice } from "@/services/format"
+import { formatDate, formatPeso } from "@/services/format"
 import {
   archivePurchaseOrders,
   createPurchaseOrder,
   deleteArchivedPurchaseOrder,
   listPurchaseOrders,
   poStatuses,
+  recordPurchaseReceipt,
   restorePurchaseOrders,
   updatePurchaseOrderStatus,
 } from "@/services/purchaseOrderService"
@@ -19,10 +20,14 @@ import type { Notify, PurchaseOrder, Supplier } from "@/types"
 export function PurchaseOrders({
   notify,
   canEdit,
+  canCreate,
+  canRecordReceipt,
   initialProductName,
 }: {
   notify: Notify
   canEdit: boolean
+  canCreate: boolean
+  canRecordReceipt: boolean
   initialProductName?: string
 }) {
   const pos = useLoad(
@@ -41,6 +46,9 @@ export function PurchaseOrders({
   const [recordView, setRecordView] = useState<"active" | "archived">("active")
   const [statusFilter, setStatusFilter] = useState("All statuses")
   const [showForm, setShowForm] = useState(false)
+  const [receiving, setReceiving] = useState<PurchaseOrder | null>(null)
+  const [receivedNow, setReceivedNow] = useState("")
+  const [savingReceipt, setSavingReceipt] = useState(false)
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>("")
   const [selectedProductId, setSelectedProductId] = useState<string>("")
   const [quantity, setQuantity] = useState<number>(1)
@@ -121,14 +129,17 @@ export function PurchaseOrders({
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     try {
-      await createPurchaseOrder({
+      const status = await createPurchaseOrder({
         supplierId: selectedSupplierId || null,
         productId: selectedProductId || null,
         quantity: quantity,
-        amount: Number(calculatedTotal),
         expectedDate: String(form.get("expected") || "") || null,
       })
-      notify("Stock purchase recorded successfully.")
+      notify(
+        status === "Pending Approval"
+          ? "Purchase request submitted for admin approval."
+          : "Stock purchase recorded successfully.",
+      )
       setShowForm(false)
       setSelectedSupplierId("")
       setSelectedProductId("")
@@ -143,12 +154,40 @@ export function PurchaseOrders({
   const changeStatus = async (po: PurchaseOrder, status: string) => {
     try {
       await updatePurchaseOrderStatus(po.id, status)
-      pos.setData((current) =>
-        current.map((p) => (p.id === po.id ? { ...p, status } : p)),
-      )
+      await pos.reload()
       notify("Status updated.")
     } catch (error) {
       notify(`Could not update: ${(error as Error).message}`)
+    }
+  }
+
+  const submitReceipt = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!receiving) return
+
+    const quantity = Number(receivedNow)
+    if (
+      !Number.isInteger(quantity) ||
+      quantity < 1 ||
+      quantity > receiving.quantity - receiving.receivedQuantity
+    ) {
+      notify(
+        "Enter a valid quantity that does not exceed the outstanding amount.",
+      )
+      return
+    }
+
+    setSavingReceipt(true)
+    try {
+      await recordPurchaseReceipt(receiving.id, quantity)
+      notify(`${quantity} units received for purchase ${receiving.poNumber}.`)
+      setReceiving(null)
+      setReceivedNow("")
+      await pos.reload()
+    } catch (error) {
+      notify(`Could not record receipt: ${(error as Error).message}`)
+    } finally {
+      setSavingReceipt(false)
     }
   }
 
@@ -231,6 +270,7 @@ export function PurchaseOrders({
           "Supplier",
           "Product",
           "Qty",
+          "Received",
           "Amount",
           "Expected Date",
           "Status",
@@ -240,7 +280,8 @@ export function PurchaseOrders({
           po.supplierName,
           po.productName ?? "—",
           String(po.quantity),
-          formatPrice(po.amount),
+          String(po.receivedQuantity),
+          formatPeso(po.amount),
           formatDate(po.expectedDate),
           po.status,
         ]),
@@ -251,15 +292,39 @@ export function PurchaseOrders({
   }
 
   const rows = visiblePurchaseOrders.map((p) => {
-    const isLocked = p.status === "Received" || p.status === "Cancelled"
+    const isLocked =
+      p.status === "Received" ||
+      p.status === "Rejected" ||
+      p.status === "Cancelled"
+    const canReceive =
+      canRecordReceipt &&
+      Boolean(p.productId) &&
+      p.receivedQuantity < p.quantity &&
+      !["Pending Approval", "Rejected", "Cancelled", "Received"].includes(
+        p.status,
+      )
+    const statusOptions = isLocked
+      ? [p.status]
+      : canEdit
+        ? p.status === "Pending Approval"
+          ? [p.status, "Approved", "Rejected", "Cancelled"]
+          : p.status === "Pending" || p.status === "Approved"
+            ? [p.status, "In transit", "Cancelled"]
+            : [p.status, "Cancelled"]
+        : p.status === "Pending" || p.status === "Approved"
+          ? [p.status, "In transit"]
+          : [p.status]
 
     let statusStyle = "input !h-9 !w-40 !text-[13px] font-medium"
     if (p.status === "Received") {
       statusStyle +=
         " bg-emerald-100 text-emerald-800 border-emerald-300 font-semibold cursor-not-allowed opacity-90"
-    } else if (p.status === "Cancelled") {
+    } else if (p.status === "Rejected" || p.status === "Cancelled") {
       statusStyle +=
         " bg-red-100 text-red-800 border-red-300 font-semibold cursor-not-allowed opacity-90"
+    } else if (p.status === "Pending Approval") {
+      statusStyle +=
+        " bg-orange-100 text-orange-800 border-orange-300 font-semibold"
     } else if (p.status === "In transit") {
       statusStyle += " bg-blue-100 text-blue-800 border-blue-300 font-semibold"
     } else {
@@ -272,23 +337,41 @@ export function PurchaseOrders({
       p.supplierName,
       p.productName ?? "—",
       p.quantity,
-      formatPrice(p.amount),
+      `${p.receivedQuantity} / ${p.quantity}`,
+      formatPeso(p.amount),
       formatDate(p.expectedDate),
       <select
         value={p.status}
-        disabled={isLocked || p.isArchived}
+        disabled={
+          isLocked ||
+          p.isArchived ||
+          (statusOptions.length === 1 && statusOptions[0] === p.status)
+        }
         onChange={(e) => changeStatus(p, e.target.value)}
         className={statusStyle}
         key={`status-${p.id}`}
       >
-        {poStatuses.map((s) => (
-          <option key={s} value={s} disabled={isLocked && s !== p.status}>
+        {statusOptions.map((s) => (
+          <option key={s} value={s}>
             {s}
           </option>
         ))}
       </select>,
-      ...(canEdit
-        ? [
+      <div className="flex items-center gap-3">
+        {canReceive && !p.isArchived && (
+          <button
+            type="button"
+            className="text-blue-700 hover:text-blue-900"
+            onClick={() => {
+              setReceiving(p)
+              setReceivedNow("")
+            }}
+          >
+            Record receipt
+          </button>
+        )}
+        {canEdit && (
+          <>
             <button
               type="button"
               className="inline-flex items-center gap-1 text-amber-700 hover:text-amber-900"
@@ -304,23 +387,22 @@ export function PurchaseOrders({
             >
               <Icon name={p.isArchived ? "eye" : "eyeoff"} size={16} />
               {p.isArchived ? "Restore" : "Archive"}
-            </button>,
-            ...(p.isArchived
-              ? [
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 text-rose-700 hover:text-rose-900"
-                    onClick={() => handleDeleteArchivedOrder(p)}
-                    aria-label={`Permanently delete purchase stock record ${p.poNumber}`}
-                    title={`Permanently delete purchase stock record ${p.poNumber}`}
-                  >
-                    <Icon name="trash" size={16} />
-                    Delete
-                  </button>,
-                ]
-              : []),
-          ]
-        : []),
+            </button>
+            {p.isArchived && (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-rose-700 hover:text-rose-900"
+                onClick={() => handleDeleteArchivedOrder(p)}
+                aria-label={`Permanently delete purchase stock record ${p.poNumber}`}
+                title={`Permanently delete purchase stock record ${p.poNumber}`}
+              >
+                <Icon name="trash" size={16} />
+                Delete
+              </button>
+            )}
+          </>
+        )}
+      </div>,
     ]
   })
 
@@ -362,7 +444,7 @@ export function PurchaseOrders({
               </button>
             )}
 
-          {canEdit && recordView === "active" && (
+          {canCreate && recordView === "active" && (
             <button
               className={`flex items-center gap-2 ${
                 showForm
@@ -413,7 +495,7 @@ export function PurchaseOrders({
         </label>
       </div>
 
-      {showForm && canEdit && recordView === "active" && (
+      {showForm && canCreate && recordView === "active" && (
         <form
           onSubmit={submit}
           className="card grid gap-4 p-5 print:hidden sm:grid-cols-3"
@@ -474,7 +556,7 @@ export function PurchaseOrders({
             <span>Unit Price</span>
             <input
               type="text"
-              value={formatPrice(unitPrice)}
+              value={formatPeso(unitPrice)}
               readOnly
               className="bg-slate-100 cursor-not-allowed font-medium"
             />
@@ -484,11 +566,15 @@ export function PurchaseOrders({
             <span>Calculated Total</span>
             <input
               type="text"
-              value={formatPrice(Number(calculatedTotal))}
+              value={formatPeso(Number(calculatedTotal))}
               readOnly
               className="bg-slate-100 font-bold text-emerald-700 cursor-not-allowed"
             />
           </label>
+
+          <p className="sm:col-span-3 text-sm text-slate-600">
+            Purchases over ₱10,000 require Admin approval.
+          </p>
 
           <label className="field">
             <span>Expected date</span>
@@ -510,16 +596,60 @@ export function PurchaseOrders({
         </form>
       )}
 
+      {receiving && (
+        <form
+          onSubmit={submitReceipt}
+          className="card flex flex-wrap items-end gap-4 p-5 print:hidden"
+        >
+          <div className="mr-auto">
+            <h2 className="font-semibold text-slate-800">
+              Record receipt for {receiving.poNumber}
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              {receiving.receivedQuantity} of {receiving.quantity} units
+              received. {receiving.quantity - receiving.receivedQuantity}{" "}
+              remaining.
+            </p>
+          </div>
+          <label className="field !mb-0">
+            <span>Quantity received now</span>
+            <input
+              type="number"
+              min="1"
+              max={receiving.quantity - receiving.receivedQuantity}
+              value={receivedNow}
+              onChange={(event) => setReceivedNow(event.target.value)}
+              required
+            />
+          </label>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setReceiving(null)}
+          >
+            Cancel
+          </button>
+          <button
+            className="btn-primary"
+            type="submit"
+            disabled={savingReceipt}
+          >
+            {savingReceipt ? "Saving..." : "Record Receipt"}
+          </button>
+        </form>
+      )}
+
       <DataTable
         columns={[
           "Order #",
           "Supplier",
           "Product",
           "Qty",
+          "Received",
           "Amount",
           "Expected Date",
           "Status",
-          ...(canEdit ? ["Actions"] : []),
+          "Actions",
         ]}
         rows={rows}
         loading={pos.loading}

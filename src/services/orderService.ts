@@ -15,9 +15,17 @@ type OrderRow = {
   products: { name: string } | { name: string }[] | null
 }
 
-export const orderStatuses = ["Pending", "Processing", "Completed", "Cancelled"]
+export const orderStatuses = [
+  "Pending",
+  "Processing",
+  "Completed",
+  "Rejected",
+  "Cancelled",
+]
 export const isOpenOrder = (o: Order) =>
-  o.status !== "Completed" && o.status !== "Cancelled"
+  o.status !== "Completed" &&
+  o.status !== "Rejected" &&
+  o.status !== "Cancelled"
 
 export async function archiveOrders(ids: string[]): Promise<void> {
   if (ids.length === 0) return
@@ -99,10 +107,10 @@ export async function updateOrderStatus(
   id: string,
   status: string,
 ): Promise<void> {
-  const { error } = await supabase
-    .from("orders")
-    .update({ status })
-    .eq("id", id)
+  const { error } = await supabase.rpc("set_order_status", {
+    target_order: id,
+    next_status: status,
+  })
   if (error) throw new Error(error.message)
 }
 

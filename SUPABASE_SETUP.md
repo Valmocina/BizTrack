@@ -2,7 +2,7 @@
 
 1. Create a project at supabase.com.
 2. Dashboard > SQL Editor: paste and run `supabase/schema.sql` (tables, security rules, 1 sample product).
-   If you already have a database, run `supabase/migrations/20261024140000_add_archive_columns.sql` and `supabase/migrations/20261024140800_add_inventory_transaction_archiving.sql` in the SQL Editor to add the archive fields and admin archive permissions.
+   If you already have a database, apply all unapplied scripts in `supabase/migrations` in timestamp order. This includes the purchase approval and partial-receipt workflow.
 3. Copy `.env.example` to `.env` and fill in the project URL and anon key (Project Settings > API).
 4. Copy `.env.seed.example` to `.env.seed` and fill in the URL and the service role key.
 5. `npm install` then `npm run seed` to create the two demo accounts:
@@ -14,8 +14,8 @@
 Never put the service role key in `.env` or anything starting with `VITE_`; it would end up in the browser bundle.
 
 ## Roles
-- `admin`: full access (products, orders, purchase orders, suppliers, users).
-- `employee`: can view everything operational and record inventory movements, but cannot change products, orders, purchase orders or users.
+- `admin`: full access to the existing app modules, including product management, order decisions, purchase approvals, suppliers, users, and settings.
+- `employee` (Staff): can view products, update stock, complete orders already in progress, view/create purchase orders, mark deliveries in transit, and record partial receipts. Purchase orders over ₱10,000 require Admin approval. Employees cannot manage products, approve/reject/cancel orders, approve/cancel/delete purchase orders, manage users, or access settings.
 
 ## Forgot password
 The login page's "Forgot password?" sends a reset email. In Supabase go to Authentication > URL Configuration and set the

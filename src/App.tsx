@@ -120,7 +120,13 @@ function Shell() {
   let content: ReactNode
   switch (page) {
     case "Inventory":
-      content = <InventoryTransactions notify={notify} canArchive={isAdmin} />
+      content = (
+        <InventoryTransactions
+          notify={notify}
+          canArchive={isAdmin}
+          canUpdateStock={true}
+        />
+      )
       break
     case "Products":
       content = (
@@ -153,6 +159,8 @@ function Shell() {
         <PurchaseOrders
           notify={notify}
           canEdit={isAdmin}
+          canCreate={true}
+          canRecordReceipt={true}
           initialProductName={reorderProduct}
         />
       )

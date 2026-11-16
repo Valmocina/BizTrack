@@ -77,10 +77,12 @@ export function InventoryTransactions({
   notify,
 
   canArchive,
+  canUpdateStock,
 }: {
   notify: Notify
 
   canArchive: boolean
+  canUpdateStock: boolean
 }) {
   const tx = useLoad(
     listTransactions,
@@ -446,8 +448,8 @@ export function InventoryTransactions({
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
-    if (!canArchive) {
-      notify("Only administrators can record inventory movements.")
+    if (!canUpdateStock) {
+      notify("You do not have permission to update stock levels.")
 
       return
     }
@@ -520,7 +522,7 @@ export function InventoryTransactions({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {canArchive && recordView === "active" && (
+          {canUpdateStock && recordView === "active" && (
             <button
               className="btn-secondary !h-10"
               onClick={() => setShowForm((open) => !open)}
@@ -745,7 +747,7 @@ export function InventoryTransactions({
         />
       </div>
 
-      {showForm && recordView === "active" && canArchive && (
+      {showForm && recordView === "active" && canUpdateStock && (
         <form
           onSubmit={submit}
           className="card grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-5"

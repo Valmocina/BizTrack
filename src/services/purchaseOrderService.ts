@@ -10,6 +10,7 @@ type PoRow = {
   created_at: string
   product_id: string | null
   quantity: number | null
+  received_quantity: number
   is_archived: boolean
   suppliers: { name: string } | { name: string }[] | null
   products: { name: string } | { name: string }[] | null
@@ -17,7 +18,9 @@ type PoRow = {
 
 export const poStatuses = [
   "Pending",
+  "Pending Approval",
   "Approved",
+  "Rejected",
   "In transit",
   "Received",
   "Cancelled",
@@ -59,7 +62,7 @@ export async function listPurchaseOrders(): Promise<PurchaseOrder[]> {
   const { data, error } = await supabase
     .from("purchase_orders")
     .select(
-      "id, po_number, amount, status, expected_date, created_at, product_id, quantity, is_archived, suppliers(name), products(name)",
+      "id, po_number, amount, status, expected_date, created_at, product_id, quantity, received_quantity, is_archived, suppliers(name), products(name)",
     )
     .order("created_at", { ascending: false })
 
@@ -76,6 +79,7 @@ export async function listPurchaseOrders(): Promise<PurchaseOrder[]> {
       productId: r.product_id,
       productName: product?.name ?? "—",
       quantity: r.quantity ?? 1,
+      receivedQuantity: r.received_quantity,
       amount: Number(r.amount),
       status: r.status,
       isArchived: r.is_archived,
@@ -89,26 +93,39 @@ export async function createPurchaseOrder(input: {
   supplierId: string | null
   productId: string | null
   quantity: number
-  amount: number
   expectedDate: string | null
-}): Promise<void> {
-  const { error } = await supabase.from("purchase_orders").insert({
-    supplier_id: input.supplierId,
-    product_id: input.productId,
-    quantity: input.quantity,
-    amount: input.amount,
-    expected_date: input.expectedDate,
+}): Promise<string> {
+  const { data, error } = await supabase.rpc("create_purchase_order", {
+    purchase_supplier_id: input.supplierId,
+    purchase_product_id: input.productId,
+    purchase_quantity: input.quantity,
+    purchase_expected_date: input.expectedDate,
   })
   if (error) throw new Error(error.message)
+  if (typeof data !== "string") {
+    throw new Error("Could not confirm the purchase order status.")
+  }
+  return data
 }
 
 export async function updatePurchaseOrderStatus(
   id: string,
   status: string,
 ): Promise<void> {
-  const { error } = await supabase
-    .from("purchase_orders")
-    .update({ status })
-    .eq("id", id)
+  const { error } = await supabase.rpc("set_purchase_order_status", {
+    target_purchase_order: id,
+    next_status: status,
+  })
+  if (error) throw new Error(error.message)
+}
+
+export async function recordPurchaseReceipt(
+  id: string,
+  quantity: number,
+): Promise<void> {
+  const { error } = await supabase.rpc("record_purchase_receipt", {
+    target_purchase_order: id,
+    received_now: quantity,
+  })
   if (error) throw new Error(error.message)
 }

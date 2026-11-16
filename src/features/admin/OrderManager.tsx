@@ -266,6 +266,7 @@ export function OrderManager({
       case "Completed":
         return "bg-emerald-100 text-emerald-800 border-emerald-300 font-semibold cursor-not-allowed opacity-90"
       case "Cancelled":
+      case "Rejected":
         return "bg-red-100 text-red-800 border-red-300 font-semibold cursor-not-allowed opacity-90"
       case "Processing":
         return "bg-blue-100 text-blue-800 border-blue-300 font-semibold"
@@ -276,7 +277,15 @@ export function OrderManager({
   }
 
   const rows = visibleOrders.map((o) => {
-    const isLocked = o.status === "Completed" || o.status === "Cancelled"
+    const isLocked =
+      o.status === "Completed" ||
+      o.status === "Rejected" ||
+      o.status === "Cancelled"
+    const editableStatuses = canEdit
+      ? orderStatuses
+      : o.status === "Processing"
+        ? ["Processing", "Completed"]
+        : [o.status]
     const statusStyle = `input !h-9 !w-40 !text-[13px] ${getStatusStyle(o.status)}`
 
     return [
@@ -306,12 +315,14 @@ export function OrderManager({
         : []),
       <select
         value={o.status}
-        disabled={isLocked || o.isArchived}
+        disabled={
+          isLocked || o.isArchived || (!canEdit && o.status !== "Processing")
+        }
         onChange={(e) => changeStatus(o, e.target.value)}
         className={statusStyle}
         key={`order-status-${o.id}`}
       >
-        {orderStatuses.map((s) => (
+        {editableStatuses.map((s) => (
           <option key={s} value={s} disabled={isLocked && s !== o.status}>
             {s}
           </option>

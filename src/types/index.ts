@@ -80,6 +80,7 @@ export type PurchaseOrder = {
   productId?: string | null
   productName?: string
   quantity: number
+  receivedQuantity: number
   amount: number
   status: string
   isArchived: boolean
