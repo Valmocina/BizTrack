@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from "react"
+import { useState, useEffect, useRef, type FormEvent } from "react"
 import { DataTable } from "@/components/ui/DataTable"
 import { Icon } from "@/components/ui/Icon"
 import { useLoad } from "@/hooks/useLoad"
@@ -8,14 +8,16 @@ import {
   archivePurchaseOrders,
   createPurchaseOrder,
   deleteArchivedPurchaseOrder,
+  listPurchaseReceipts,
   listPurchaseOrders,
   poStatuses,
   recordPurchaseReceipt,
   restorePurchaseOrders,
+  updatePurchaseOrder,
   updatePurchaseOrderStatus,
 } from "@/services/purchaseOrderService"
 import { listSuppliers } from "@/services/supplierService"
-import type { Notify, PurchaseOrder, Supplier } from "@/types"
+import type { Notify, PurchaseOrder, PurchaseReceipt, Supplier } from "@/types"
 
 export function PurchaseOrders({
   notify,
@@ -48,7 +50,21 @@ export function PurchaseOrders({
   const [showForm, setShowForm] = useState(false)
   const [receiving, setReceiving] = useState<PurchaseOrder | null>(null)
   const [receivedNow, setReceivedNow] = useState("")
+  const [receiptNotes, setReceiptNotes] = useState("")
   const [savingReceipt, setSavingReceipt] = useState(false)
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null)
+  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 })
+  const [viewingOrder, setViewingOrder] = useState<PurchaseOrder | null>(null)
+  const [detailView, setDetailView] = useState<"details" | "receipts">(
+    "details",
+  )
+  const receiptHistoryRequest = useRef(0)
+  const [receiptHistory, setReceiptHistory] = useState<PurchaseReceipt[]>([])
+  const [loadingReceiptHistory, setLoadingReceiptHistory] = useState(false)
+  const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null)
+  const [editQuantity, setEditQuantity] = useState("")
+  const [editExpectedDate, setEditExpectedDate] = useState("")
+  const [savingEdit, setSavingEdit] = useState(false)
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>("")
   const [selectedProductId, setSelectedProductId] = useState<string>("")
   const [quantity, setQuantity] = useState<number>(1)
@@ -154,11 +170,92 @@ export function PurchaseOrders({
   const changeStatus = async (po: PurchaseOrder, status: string) => {
     try {
       await updatePurchaseOrderStatus(po.id, status)
+      setActiveMenuId(null)
       await pos.reload()
-      notify("Status updated.")
+      notify(
+        status === "In transit"
+          ? `Purchase ${po.poNumber} marked in transit.`
+          : `Purchase ${po.poNumber} status updated.`,
+      )
     } catch (error) {
       notify(`Could not update: ${(error as Error).message}`)
     }
+  }
+
+  const openOrder = async (
+    order: PurchaseOrder,
+    view: "details" | "receipts" = "details",
+  ) => {
+    const requestId = ++receiptHistoryRequest.current
+    setViewingOrder(order)
+    setDetailView(view)
+    setReceiptHistory([])
+    setLoadingReceiptHistory(true)
+    setActiveMenuId(null)
+    try {
+      const history = await listPurchaseReceipts(order.id)
+      if (requestId === receiptHistoryRequest.current) {
+        setReceiptHistory(history)
+      }
+    } catch (error) {
+      if (requestId === receiptHistoryRequest.current) {
+        notify(`Could not load receipt history: ${(error as Error).message}`)
+      }
+    } finally {
+      if (requestId === receiptHistoryRequest.current) {
+        setLoadingReceiptHistory(false)
+      }
+    }
+  }
+
+  const openEditOrder = (order: PurchaseOrder) => {
+    setEditingOrder(order)
+    setEditQuantity(String(order.quantity))
+    setEditExpectedDate(order.expectedDate ?? "")
+    setActiveMenuId(null)
+  }
+
+  const submitEditOrder = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!editingOrder) return
+
+    const quantity = Number(editQuantity)
+    if (
+      !Number.isInteger(quantity) ||
+      quantity < 1 ||
+      quantity < editingOrder.receivedQuantity
+    ) {
+      notify(
+        "Quantity must be a whole number and cannot be less than received.",
+      )
+      return
+    }
+
+    setSavingEdit(true)
+    try {
+      await updatePurchaseOrder(
+        editingOrder.id,
+        quantity,
+        editExpectedDate || null,
+      )
+      setEditingOrder(null)
+      await pos.reload()
+      notify(`Purchase ${editingOrder.poNumber} updated.`)
+    } catch (error) {
+      notify(`Could not update purchase order: ${(error as Error).message}`)
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  const cancelOrder = async (order: PurchaseOrder) => {
+    if (
+      !window.confirm(
+        `Cancel purchase order ${order.poNumber}? This cannot be undone.`,
+      )
+    )
+      return
+    await changeStatus(order, "Cancelled")
   }
 
   const submitReceipt = async (event: FormEvent<HTMLFormElement>) => {
@@ -179,32 +276,16 @@ export function PurchaseOrders({
 
     setSavingReceipt(true)
     try {
-      await recordPurchaseReceipt(receiving.id, quantity)
+      await recordPurchaseReceipt(receiving.id, quantity, receiptNotes.trim())
       notify(`${quantity} units received for purchase ${receiving.poNumber}.`)
       setReceiving(null)
       setReceivedNow("")
+      setReceiptNotes("")
       await pos.reload()
     } catch (error) {
       notify(`Could not record receipt: ${(error as Error).message}`)
     } finally {
       setSavingReceipt(false)
-    }
-  }
-
-  const handleArchive = async () => {
-    if (
-      !window.confirm(
-        `Archive these ${visiblePurchaseOrders.length} purchase stock records? You can restore them from the Archived tab.`,
-      )
-    )
-      return
-
-    try {
-      await archivePurchaseOrders(visiblePurchaseOrders.map((po) => po.id))
-      notify("Purchase stock records archived.")
-      await pos.reload()
-    } catch (error) {
-      notify(`Could not archive purchase stock: ${(error as Error).message}`)
     }
   }
 
@@ -219,9 +300,13 @@ export function PurchaseOrders({
   }
 
   const handleArchiveOrder = async (order: PurchaseOrder) => {
+    if (!["Received", "Cancelled"].includes(order.status)) {
+      notify("Only received or cancelled purchase orders can be archived.")
+      return
+    }
     if (
       !window.confirm(
-        `Archive purchase stock record ${order.poNumber}? You can restore it from the Archived tab.`,
+        `Archive purchase order ${order.poNumber}? You can restore it from the Archived tab.`,
       )
     )
       return
@@ -292,45 +377,40 @@ export function PurchaseOrders({
   }
 
   const rows = visiblePurchaseOrders.map((p) => {
-    const isLocked =
-      p.status === "Received" ||
-      p.status === "Rejected" ||
-      p.status === "Cancelled"
+    const isReceived = p.status === "Received"
+    const isCancelled = p.status === "Cancelled"
+    const isTerminal = isReceived || isCancelled
     const canReceive =
       canRecordReceipt &&
       Boolean(p.productId) &&
       p.receivedQuantity < p.quantity &&
-      !["Pending Approval", "Rejected", "Cancelled", "Received"].includes(
+      ["In transit", "Partially Received"].includes(p.status)
+    const canEditOrder =
+      canEdit &&
+      !p.isArchived &&
+      ["Pending", "Pending Approval", "Approved"].includes(p.status) &&
+      p.receivedQuantity === 0
+    const canMarkInTransit =
+      !p.isArchived &&
+      ["Pending", "Approved"].includes(p.status) &&
+      (p.amount <= 10000 || p.status === "Approved")
+    const canCancel =
+      canEdit &&
+      !p.isArchived &&
+      ["Pending", "Pending Approval", "Approved", "In transit"].includes(
         p.status,
       )
-    const statusOptions = isLocked
-      ? [p.status]
-      : canEdit
-        ? p.status === "Pending Approval"
-          ? [p.status, "Approved", "Rejected", "Cancelled"]
-          : p.status === "Pending" || p.status === "Approved"
-            ? [p.status, "In transit", "Cancelled"]
-            : [p.status, "Cancelled"]
-        : p.status === "Pending" || p.status === "Approved"
-          ? [p.status, "In transit"]
-          : [p.status]
-
-    let statusStyle = "input !h-9 !w-40 !text-[13px] font-medium"
-    if (p.status === "Received") {
-      statusStyle +=
-        " bg-emerald-100 text-emerald-800 border-emerald-300 font-semibold cursor-not-allowed opacity-90"
-    } else if (p.status === "Rejected" || p.status === "Cancelled") {
-      statusStyle +=
-        " bg-red-100 text-red-800 border-red-300 font-semibold cursor-not-allowed opacity-90"
-    } else if (p.status === "Pending Approval") {
-      statusStyle +=
-        " bg-orange-100 text-orange-800 border-orange-300 font-semibold"
-    } else if (p.status === "In transit") {
-      statusStyle += " bg-blue-100 text-blue-800 border-blue-300 font-semibold"
-    } else {
-      statusStyle +=
-        " bg-amber-100 text-amber-800 border-amber-300 font-semibold"
-    }
+    const statusTone = isReceived
+      ? "bg-emerald-100 text-emerald-800"
+      : p.status === "Cancelled" || p.status === "Rejected"
+        ? "bg-red-100 text-red-800"
+        : p.status === "Pending Approval"
+          ? "bg-orange-100 text-orange-800"
+          : p.status === "In transit"
+            ? "bg-blue-100 text-blue-800"
+            : p.status === "Partially Received"
+              ? "bg-violet-100 text-violet-800"
+              : "bg-amber-100 text-amber-800"
 
     return [
       p.poNumber,
@@ -340,66 +420,157 @@ export function PurchaseOrders({
       `${p.receivedQuantity} / ${p.quantity}`,
       formatPeso(p.amount),
       formatDate(p.expectedDate),
-      <select
-        value={p.status}
-        disabled={
-          isLocked ||
-          p.isArchived ||
-          (statusOptions.length === 1 && statusOptions[0] === p.status)
-        }
-        onChange={(e) => changeStatus(p, e.target.value)}
-        className={statusStyle}
+      <span
         key={`status-${p.id}`}
+        className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${statusTone}`}
       >
-        {statusOptions.map((s) => (
-          <option key={s} value={s}>
-            {s}
-          </option>
-        ))}
-      </select>,
-      <div className="flex items-center gap-3">
+        {p.status}
+      </span>,
+      <div className="flex items-center justify-end gap-2">
         {canReceive && !p.isArchived && (
           <button
             type="button"
-            className="text-blue-700 hover:text-blue-900"
+            className="btn-secondary !h-9 !px-3 text-xs"
             onClick={() => {
               setReceiving(p)
               setReceivedNow("")
+              setReceiptNotes("")
             }}
           >
-            Record receipt
+            Record Receipt
           </button>
         )}
-        {canEdit && (
+        <button
+          type="button"
+          className="grid size-9 place-items-center rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50"
+          aria-label={`Actions for purchase order ${p.poNumber}`}
+          aria-expanded={activeMenuId === p.id}
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect()
+            setMenuPosition({
+              top: Math.max(
+                8,
+                Math.min(rect.bottom + 6, window.innerHeight - 260),
+              ),
+              right: window.innerWidth - rect.right,
+            })
+            setActiveMenuId(activeMenuId === p.id ? null : p.id)
+          }}
+        >
+          <Icon name="more" size={18} />
+        </button>
+        {activeMenuId === p.id && (
           <>
             <button
               type="button"
-              className="inline-flex items-center gap-1 text-amber-700 hover:text-amber-900"
-              onClick={() =>
-                p.isArchived ? handleRestoreOrder(p) : handleArchiveOrder(p)
-              }
-              aria-label={`${
-                p.isArchived ? "Restore" : "Archive"
-              } purchase stock record ${p.poNumber}`}
-              title={`${
-                p.isArchived ? "Restore" : "Archive"
-              } purchase stock record ${p.poNumber}`}
+              className="fixed inset-0 z-40 cursor-default"
+              aria-label="Close actions menu"
+              onClick={() => setActiveMenuId(null)}
+            />
+            <div
+              role="menu"
+              className="fixed z-50 max-h-[calc(100vh-2rem)] w-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"
+              style={{ top: menuPosition.top, right: menuPosition.right }}
             >
-              <Icon name={p.isArchived ? "eye" : "eyeoff"} size={16} />
-              {p.isArchived ? "Restore" : "Archive"}
-            </button>
-            {p.isArchived && (
               <button
                 type="button"
-                className="inline-flex items-center gap-1 text-rose-700 hover:text-rose-900"
-                onClick={() => handleDeleteArchivedOrder(p)}
-                aria-label={`Permanently delete purchase stock record ${p.poNumber}`}
-                title={`Permanently delete purchase stock record ${p.poNumber}`}
+                role="menuitem"
+                className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
+                onClick={() => void openOrder(p)}
               >
-                <Icon name="trash" size={16} />
-                Delete
+                View Details
               </button>
-            )}
+              {isReceived && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
+                  onClick={() => void openOrder(p, "receipts")}
+                >
+                  View Receipt History
+                </button>
+              )}
+              {canEditOrder && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
+                  onClick={() => openEditOrder(p)}
+                >
+                  Edit Purchase Order
+                </button>
+              )}
+              {canMarkInTransit && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
+                  onClick={() => void changeStatus(p, "In transit")}
+                >
+                  Mark In Transit
+                </button>
+              )}
+              {canEdit && p.status === "Pending Approval" && !p.isArchived && (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
+                    onClick={() => void changeStatus(p, "Approved")}
+                  >
+                    Approve Purchase Order
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50"
+                    onClick={() => void changeStatus(p, "Rejected")}
+                  >
+                    Reject Purchase Order
+                  </button>
+                </>
+              )}
+              {canCancel && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50"
+                  onClick={() => void cancelOrder(p)}
+                >
+                  Cancel Purchase Order
+                </button>
+              )}
+              {canEdit && !p.isArchived && isTerminal && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
+                  onClick={() => handleArchiveOrder(p)}
+                >
+                  Archive
+                </button>
+              )}
+              {canEdit && p.isArchived && (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
+                    onClick={() => handleRestoreOrder(p)}
+                  >
+                    Restore
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50"
+                    onClick={() => handleDeleteArchivedOrder(p)}
+                  >
+                    Permanently Delete
+                  </button>
+                </>
+              )}
+            </div>
           </>
         )}
       </div>,
@@ -427,14 +598,6 @@ export function PurchaseOrders({
           >
             Excel
           </button>
-
-          {canEdit &&
-            recordView === "active" &&
-            visiblePurchaseOrders.length > 0 && (
-              <button className="btn-secondary" onClick={handleArchive}>
-                Archive ({visiblePurchaseOrders.length})
-              </button>
-            )}
 
           {canEdit &&
             recordView === "archived" &&
@@ -622,10 +785,23 @@ export function PurchaseOrders({
               required
             />
           </label>
+          <label className="field !mb-0 min-w-56 flex-1">
+            <span>Notes or discrepancies (optional)</span>
+            <input
+              type="text"
+              maxLength={500}
+              value={receiptNotes}
+              onChange={(event) => setReceiptNotes(event.target.value)}
+              placeholder="Condition, short shipment, etc."
+            />
+          </label>
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => setReceiving(null)}
+            onClick={() => {
+              setReceiving(null)
+              setReceiptNotes("")
+            }}
           >
             Cancel
           </button>
@@ -659,6 +835,190 @@ export function PurchaseOrders({
             : `No ${recordView} records with this status.`
         }
       />
+
+      {viewingOrder && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4 print:hidden"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setViewingOrder(null)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="purchase-order-details-title"
+            className="card max-h-[90vh] w-full max-w-2xl overflow-y-auto p-6"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2
+                  id="purchase-order-details-title"
+                  className="text-xl font-bold text-slate-900"
+                >
+                  {detailView === "receipts"
+                    ? `Receipt History · ${viewingOrder.poNumber}`
+                    : `Purchase Order · ${viewingOrder.poNumber}`}
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  {viewingOrder.supplierName} · {viewingOrder.productName}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="grid size-9 shrink-0 place-items-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                aria-label="Close purchase order details"
+                onClick={() => setViewingOrder(null)}
+              >
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+
+            {detailView === "details" && (
+              <dl className="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2">
+                <div>
+                  <dt className="text-xs font-semibold uppercase text-slate-500">
+                    Status
+                  </dt>
+                  <dd className="mt-1 font-medium text-slate-800">
+                    {viewingOrder.status}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase text-slate-500">
+                    Amount
+                  </dt>
+                  <dd className="mt-1 font-medium text-slate-800">
+                    {formatPeso(viewingOrder.amount)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase text-slate-500">
+                    Quantity received
+                  </dt>
+                  <dd className="mt-1 font-medium text-slate-800">
+                    {viewingOrder.receivedQuantity} / {viewingOrder.quantity}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase text-slate-500">
+                    Expected date
+                  </dt>
+                  <dd className="mt-1 font-medium text-slate-800">
+                    {formatDate(viewingOrder.expectedDate)}
+                  </dd>
+                </div>
+              </dl>
+            )}
+
+            <div className="mt-6">
+              <h3 className="font-semibold text-slate-800">Receipt history</h3>
+              {loadingReceiptHistory ? (
+                <p className="mt-3 text-sm text-slate-500">
+                  Loading receipt history...
+                </p>
+              ) : receiptHistory.length === 0 ? (
+                <p className="mt-3 rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+                  No receipts have been recorded for this order.
+                </p>
+              ) : (
+                <ol className="mt-3 divide-y divide-slate-200 rounded-xl border border-slate-200">
+                  {receiptHistory.map((receipt) => (
+                    <li key={receipt.id} className="space-y-2 p-4">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-semibold text-slate-800">
+                          {receipt.quantity} units received
+                        </span>
+                        <time
+                          className="text-xs text-slate-500"
+                          dateTime={receipt.receivedAt}
+                        >
+                          {new Date(receipt.receivedAt).toLocaleString()}
+                        </time>
+                      </div>
+                      <p className="text-sm text-slate-600">
+                        Recorded by {receipt.receivedByName} ·{" "}
+                        {receipt.remainingQuantity} remaining
+                      </p>
+                      {receipt.notes && (
+                        <p className="text-sm text-slate-700">
+                          {receipt.notes}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {editingOrder && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4 print:hidden"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setEditingOrder(null)
+          }}
+        >
+          <form
+            onSubmit={submitEditOrder}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-purchase-order-title"
+            className="card w-full max-w-lg space-y-4 p-6"
+          >
+            <div>
+              <h2
+                id="edit-purchase-order-title"
+                className="text-xl font-bold text-slate-900"
+              >
+                Edit Purchase Order
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                {editingOrder.poNumber} · {editingOrder.supplierName} ·{" "}
+                {editingOrder.productName}
+              </p>
+            </div>
+            <label className="field">
+              <span>Order quantity</span>
+              <input
+                type="number"
+                min={Math.max(1, editingOrder.receivedQuantity)}
+                step="1"
+                value={editQuantity}
+                onChange={(event) => setEditQuantity(event.target.value)}
+                required
+              />
+            </label>
+            <label className="field">
+              <span>Expected date</span>
+              <input
+                type="date"
+                value={editExpectedDate}
+                onChange={(event) => setEditExpectedDate(event.target.value)}
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setEditingOrder(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={savingEdit}
+              >
+                {savingEdit ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }

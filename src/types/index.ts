@@ -88,6 +88,15 @@ export type PurchaseOrder = {
   createdAt: string
 }
 
+export type PurchaseReceipt = {
+  id: string
+  quantity: number
+  remainingQuantity: number
+  receivedAt: string
+  receivedByName: string
+  notes: string
+}
+
 export type TxType = "IN" | "OUT" | "ADJUST"
 
 export type InventoryTransaction = {

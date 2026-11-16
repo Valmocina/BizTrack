@@ -81,6 +81,20 @@ create table if not exists public.purchase_orders (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.purchase_order_receipts (
+  id uuid primary key default gen_random_uuid(),
+  purchase_order_id uuid not null references public.purchase_orders (id) on delete cascade,
+  quantity integer not null check (quantity > 0),
+  remaining_quantity integer not null check (remaining_quantity >= 0),
+  received_at timestamptz not null default now(),
+  received_by uuid references public.profiles (id) on delete set null default auth.uid(),
+  received_by_name text not null default 'Unknown staff',
+  notes text
+);
+
+create index if not exists purchase_order_receipts_order_idx
+  on public.purchase_order_receipts (purchase_order_id, received_at desc);
+
 alter table public.orders add column if not exists is_archived boolean not null default false;
 alter table public.purchase_orders add column if not exists is_archived boolean not null default false;
 alter table public.purchase_orders
@@ -340,7 +354,9 @@ begin
     end if;
   elsif next_status = 'Cancelled' then
     if actor_role <> 'admin'
-      or purchase_order.status in ('Received', 'Rejected', 'Cancelled')
+      or purchase_order.status not in (
+        'Pending', 'Pending Approval', 'Approved', 'In transit'
+      )
     then
       raise exception 'Only administrators can cancel open purchase orders.';
     end if;
@@ -354,9 +370,10 @@ begin
 end;
 $$;
 
-create or replace function public.record_purchase_receipt(
+create or replace function public.update_purchase_order(
   target_purchase_order uuid,
-  received_now integer
+  new_quantity integer,
+  new_expected_date date
 )
 returns void
 language plpgsql
@@ -366,9 +383,78 @@ as $$
 declare
   actor_role text;
   purchase_order public.purchase_orders%rowtype;
-  new_received_quantity integer;
+  updated_amount numeric;
 begin
   select role into actor_role
+  from public.profiles
+  where id = auth.uid();
+
+  if actor_role is distinct from 'admin' then
+    raise exception 'Only administrators can edit purchase orders.';
+  end if;
+
+  select *
+  into purchase_order
+  from public.purchase_orders
+  where id = target_purchase_order
+  for update;
+
+  if not found then
+    raise exception 'Purchase order % does not exist.', target_purchase_order;
+  end if;
+
+  if purchase_order.is_archived
+    or purchase_order.status not in ('Pending', 'Pending Approval', 'Approved')
+    or purchase_order.received_quantity > 0
+  then
+    raise exception 'This purchase order can no longer be edited.';
+  end if;
+
+  if new_quantity is null or new_quantity < 1
+    or new_quantity < purchase_order.received_quantity
+  then
+    raise exception 'Order quantity must be positive and cannot be less than the quantity received.';
+  end if;
+
+  updated_amount := round(
+    (purchase_order.amount / greatest(coalesce(purchase_order.quantity, 1), 1))
+      * new_quantity,
+    2
+  );
+
+  update public.purchase_orders
+  set quantity = new_quantity,
+      amount = updated_amount,
+      status = case
+        when purchase_order.status = 'Pending Approval'
+          and updated_amount <= 10000 then 'Pending'
+        when purchase_order.status = 'Pending'
+          and updated_amount > 10000 then 'Approved'
+        else purchase_order.status
+      end,
+      expected_date = new_expected_date
+  where id = target_purchase_order;
+end;
+$$;
+
+create or replace function public.record_purchase_receipt(
+  target_purchase_order uuid,
+  received_now integer,
+  receipt_notes text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  actor_role text;
+  actor_name text;
+  purchase_order public.purchase_orders%rowtype;
+  new_received_quantity integer;
+begin
+  select role, coalesce(nullif(full_name, ''), email, 'Unknown staff')
+  into actor_role, actor_name
   from public.profiles
   where id = auth.uid();
 
@@ -390,12 +476,20 @@ begin
     raise exception 'Archived purchase orders cannot receive stock.';
   end if;
 
-  if purchase_order.status in ('Pending Approval', 'Rejected', 'Cancelled', 'Received') then
+  if purchase_order.status in (
+    'Pending Approval', 'Rejected', 'Cancelled', 'Received'
+  ) then
     raise exception 'This purchase order is not eligible for receiving stock.';
   end if;
 
+  if purchase_order.status not in ('In transit', 'Partially Received') then
+    raise exception 'Mark the purchase order in transit before recording a receipt.';
+  end if;
+
   if purchase_order.amount > 10000
-    and purchase_order.status not in ('Approved', 'In transit')
+    and purchase_order.status not in (
+      'Approved', 'In transit', 'Partially Received'
+    )
   then
     raise exception 'High-value purchases require admin approval before receiving stock.';
   end if;
@@ -418,9 +512,26 @@ begin
   set received_quantity = new_received_quantity,
       status = case
         when new_received_quantity = quantity then 'Received'
-        else 'In transit'
+        else 'Partially Received'
       end
   where id = target_purchase_order;
+
+  insert into public.purchase_order_receipts (
+    purchase_order_id,
+    quantity,
+    remaining_quantity,
+    received_by,
+    received_by_name,
+    notes
+  )
+  values (
+    target_purchase_order,
+    received_now,
+    coalesce(purchase_order.quantity, 0) - new_received_quantity,
+    auth.uid(),
+    actor_name,
+    nullif(trim(receipt_notes), '')
+  );
 
   insert into public.inventory_transactions (
     product_id,
@@ -444,11 +555,13 @@ $$;
 revoke all on function public.set_order_status(uuid, text) from public, anon;
 revoke all on function public.create_purchase_order(uuid, uuid, integer, date) from public, anon;
 revoke all on function public.set_purchase_order_status(uuid, text) from public, anon;
-revoke all on function public.record_purchase_receipt(uuid, integer) from public, anon;
+revoke all on function public.update_purchase_order(uuid, integer, date) from public, anon;
+revoke all on function public.record_purchase_receipt(uuid, integer, text) from public, anon;
 grant execute on function public.set_order_status(uuid, text) to authenticated;
 grant execute on function public.create_purchase_order(uuid, uuid, integer, date) to authenticated;
 grant execute on function public.set_purchase_order_status(uuid, text) to authenticated;
-grant execute on function public.record_purchase_receipt(uuid, integer) to authenticated;
+grant execute on function public.update_purchase_order(uuid, integer, date) to authenticated;
+grant execute on function public.record_purchase_receipt(uuid, integer, text) to authenticated;
 
 -- New User Profile Sync Function
 create or replace function public.handle_new_user()
@@ -748,6 +861,9 @@ alter table public.suppliers enable row level security;
 alter table public.supplier_products enable row level security;
 alter table public.orders enable row level security;
 alter table public.purchase_orders enable row level security;
+alter table public.purchase_order_receipts enable row level security;
+revoke all on public.purchase_order_receipts from public, anon, authenticated;
+grant select on public.purchase_order_receipts to authenticated;
 alter table public.inventory_transactions enable row level security;
 alter table public.notifications enable row level security;
 
@@ -784,8 +900,26 @@ drop policy if exists "po_select" on public.purchase_orders;
 drop policy if exists "po_update" on public.purchase_orders;
 drop policy if exists "po_admin_write" on public.purchase_orders;
 create policy "po_select" on public.purchase_orders for select to authenticated using (true);
-create policy "po_update" on public.purchase_orders for update to authenticated using (public.is_admin()) with check (public.is_admin());
-create policy "po_admin_write" on public.purchase_orders for all to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "po_update" on public.purchase_orders
+  for update to authenticated
+  using (public.is_admin())
+  with check (
+    public.is_admin()
+    and (not is_archived or status in ('Received', 'Cancelled'))
+  );
+create policy "po_admin_write" on public.purchase_orders
+  for all to authenticated
+  using (public.is_admin())
+  with check (
+    public.is_admin()
+    and (not is_archived or status in ('Received', 'Cancelled'))
+  );
+
+drop policy if exists "purchase_order_receipts_select" on public.purchase_order_receipts;
+create policy "purchase_order_receipts_select"
+  on public.purchase_order_receipts
+  for select to authenticated
+  using (true);
 
 -- Inventory Transactions Policy
 drop policy if exists "tx_select" on public.inventory_transactions;

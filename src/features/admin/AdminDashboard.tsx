@@ -11,7 +11,10 @@ import { listTransactions } from "@/services/inventoryService"
 import { listNotifications } from "@/services/notificationService"
 import { isOpenOrder, listOrders } from "@/services/orderService"
 import { listProducts, stockStatus } from "@/services/productService"
-import { listPurchaseOrders } from "@/services/purchaseOrderService"
+import {
+  listPurchaseOrders,
+  receivedPurchaseAmount,
+} from "@/services/purchaseOrderService"
 import { formatPrice, timeAgo } from "@/services/format"
 import type { IconName, Notify } from "@/types"
 
@@ -70,17 +73,17 @@ export function AdminDashboard({
   ).length
   const openOrders = orders.filter(isOpenOrder)
   const openPos = pos.filter(
-    (p) =>
-      p.status !== "Completed" &&
-      p.status !== "Cancelled" &&
-      p.status !== "Closed",
+    (p) => !["Received", "Cancelled", "Rejected"].includes(p.status),
   )
   const totalRevenue = orders
     .filter((order) => order.status === "Completed")
     .reduce((total, order) => total + order.total, 0)
   const totalSpent = pos
-    .filter((purchaseOrder) => purchaseOrder.status === "Received")
-    .reduce((total, purchaseOrder) => total + purchaseOrder.amount, 0)
+    .filter((purchaseOrder) => purchaseOrder.receivedQuantity > 0)
+    .reduce(
+      (total, purchaseOrder) => total + receivedPurchaseAmount(purchaseOrder),
+      0,
+    )
   const netProfit = totalRevenue - totalSpent
   const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0
 
@@ -197,10 +200,10 @@ export function AdminDashboard({
               <p className="mt-2 text-sm text-slate-600">
                 {
                   pos.filter(
-                    (purchaseOrder) => purchaseOrder.status === "Received",
+                    (purchaseOrder) => purchaseOrder.receivedQuantity > 0,
                   ).length
                 }{" "}
-                received purchase orders
+                purchase orders with receipts
               </p>
             </article>
             <article className="card border-l-4 border-l-blue-500 p-5">

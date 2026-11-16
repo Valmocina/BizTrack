@@ -2,7 +2,7 @@
 
 1. Create a project at supabase.com.
 2. Dashboard > SQL Editor: paste and run `supabase/schema.sql` (tables, security rules, 1 sample product).
-   If you already have a database, apply all unapplied scripts in `supabase/migrations` in timestamp order. This includes the purchase approval and partial-receipt workflow.
+   If you already have a database, apply all unapplied scripts in `supabase/migrations` in timestamp order. These include the purchase approval, partial-receipt, and receipt-history workflows.
 3. Copy `.env.example` to `.env` and fill in the project URL and anon key (Project Settings > API).
 4. Copy `.env.seed.example` to `.env.seed` and fill in the URL and the service role key.
 5. `npm install` then `npm run seed` to create the two demo accounts:

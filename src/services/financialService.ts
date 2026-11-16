@@ -1,5 +1,7 @@
-// src/services/financialService.ts
-import { listPurchaseOrders } from "@/services/purchaseOrderService";
+import {
+  listPurchaseOrders,
+  receivedPurchaseAmount,
+} from "@/services/purchaseOrderService";
 import { listOrders } from "@/services/orderService";
 
 export type FinancialSummary = {
@@ -15,12 +17,10 @@ export async function getFinancialSummary(): Promise<FinancialSummary> {
     listOrders(),
   ]);
 
-  // Expenses: Sum of received Purchase Orders
   const totalSpent = pos
-    .filter((p) => p.status === "Received")
-    .reduce((sum, p) => sum + p.amount, 0);
+    .filter((p) => p.receivedQuantity > 0)
+    .reduce((sum, p) => sum + receivedPurchaseAmount(p), 0);
 
-  // Revenue: Sum of completed Customer Orders
   const totalRevenue = orders
     .filter((o) => o.status === "Completed")
     .reduce((sum, o) => sum + o.total, 0);

@@ -1,5 +1,5 @@
 import { supabase } from "@/services/supabaseClient"
-import type { PurchaseOrder } from "@/types"
+import type { PurchaseOrder, PurchaseReceipt } from "@/types"
 
 type PoRow = {
   id: string
@@ -22,17 +22,37 @@ export const poStatuses = [
   "Approved",
   "Rejected",
   "In transit",
+  "Partially Received",
   "Received",
   "Cancelled",
 ]
 
+export function receivedPurchaseAmount(
+  purchaseOrder: Pick<PurchaseOrder, "amount" | "quantity" | "receivedQuantity">,
+): number {
+  if (purchaseOrder.quantity <= 0) return 0
+  const receivedAmount =
+    (purchaseOrder.amount *
+      Math.min(purchaseOrder.receivedQuantity, purchaseOrder.quantity)) /
+    purchaseOrder.quantity
+  return Math.round(receivedAmount * 100) / 100
+}
+
 export async function archivePurchaseOrders(ids: string[]): Promise<void> {
   if (ids.length === 0) return
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("purchase_orders")
     .update({ is_archived: true })
     .in("id", ids)
+    .eq("is_archived", false)
+    .in("status", ["Received", "Cancelled"])
+    .select("id")
   if (error) throw new Error(error.message)
+  if ((data?.length ?? 0) !== ids.length) {
+    throw new Error(
+      "Only received or cancelled purchase orders can be archived.",
+    )
+  }
 }
 
 export async function restorePurchaseOrders(ids: string[]): Promise<void> {
@@ -119,13 +139,60 @@ export async function updatePurchaseOrderStatus(
   if (error) throw new Error(error.message)
 }
 
+export async function updatePurchaseOrder(
+  id: string,
+  quantity: number,
+  expectedDate: string | null,
+): Promise<void> {
+  const { error } = await supabase.rpc("update_purchase_order", {
+    target_purchase_order: id,
+    new_quantity: quantity,
+    new_expected_date: expectedDate,
+  })
+  if (error) throw new Error(error.message)
+}
+
 export async function recordPurchaseReceipt(
   id: string,
   quantity: number,
+  notes: string,
 ): Promise<void> {
   const { error } = await supabase.rpc("record_purchase_receipt", {
     target_purchase_order: id,
     received_now: quantity,
+    receipt_notes: notes || null,
   })
   if (error) throw new Error(error.message)
+}
+
+type ReceiptRow = {
+  id: string
+  quantity: number
+  remaining_quantity: number
+  received_at: string
+  received_by_name: string
+  notes: string | null
+}
+
+export async function listPurchaseReceipts(
+  purchaseOrderId: string,
+): Promise<PurchaseReceipt[]> {
+  const { data, error } = await supabase
+    .from("purchase_order_receipts")
+    .select(
+      "id, quantity, remaining_quantity, received_at, received_by_name, notes",
+    )
+    .eq("purchase_order_id", purchaseOrderId)
+    .order("received_at", { ascending: false })
+
+  if (error) throw new Error(error.message)
+
+  return (data as unknown as ReceiptRow[]).map((row) => ({
+    id: row.id,
+    quantity: row.quantity,
+    remainingQuantity: row.remaining_quantity,
+    receivedAt: row.received_at,
+    receivedByName: row.received_by_name,
+    notes: row.notes ?? "",
+  }))
 }
