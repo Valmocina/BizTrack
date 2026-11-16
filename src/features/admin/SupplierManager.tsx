@@ -54,8 +54,14 @@ export function SupplierManager({
   )
   const visibleSuppliers =
     recordView === "active" ? activeSuppliers : archivedSuppliers
-  const unlinkedProducts = products.data.filter(
-    (product) => (product.isActive ?? true) && !(product.hasSupplier ?? false),
+  const activeProducts = products.data.filter(
+    (product) => product.isActive ?? true,
+  )
+  const linkedProductIds = new Set(
+    editingSupplier?.products?.map((product) => product.productId) ?? [],
+  )
+  const availableProductsForEditing = activeProducts.filter(
+    (product) => !linkedProductIds.has(product.id),
   )
 
   useEffect(() => {
@@ -104,10 +110,6 @@ export function SupplierManager({
       if (!addProdId) return
       const foundProduct = products.data.find((p) => p.id === addProdId)
       if (!foundProduct) return
-      if (foundProduct.hasSupplier) {
-        notify("This product is already linked to a supplier.")
-        return
-      }
 
       if (newSupplierProducts.some((p) => p.productId === addProdId)) {
         notify("This product is already added to the list.")
@@ -241,15 +243,13 @@ export function SupplierManager({
         })
 
         targetProductId = newProduct.id
-        targetProductId = newProduct.id
-        const selectedProduct = unlinkedProducts.find(
+      } else if (
+        !availableProductsForEditing.some(
           (product) => product.id === selectedProductId,
         )
-        if (!selectedProduct) {
-          notify("Choose a product that is not linked to another supplier.")
-          await products.reload()
-          return
-        }
+      ) {
+        notify("Choose an active product not already linked to this supplier.")
+        return
       }
 
       if (!targetProductId) return
@@ -261,7 +261,7 @@ export function SupplierManager({
         unitPrice: Number(unitPrice),
       })
 
-      notify("Product created and assigned to supplier successfully.")
+      notify("Product linked to supplier successfully.")
 
       // 3. Reset form state
       setSelectedProductId("")
@@ -528,15 +528,15 @@ export function SupplierManager({
                       onChange={(e) => setAddProdId(e.target.value)}
                     >
                       <option value="">Choose a product</option>
-                      {unlinkedProducts.map((p) => (
+                      {activeProducts.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
                         </option>
                       ))}
                     </select>
-                    {unlinkedProducts.length === 0 && (
+                    {activeProducts.length === 0 && (
                       <span className="text-sm text-slate-600">
-                        No unlinked products available.
+                        No active products available.
                       </span>
                     )}
                   </label>
@@ -710,15 +710,15 @@ export function SupplierManager({
                     <option value="" disabled>
                       Choose a product
                     </option>
-                    {unlinkedProducts.map((p) => (
+                    {availableProductsForEditing.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
                       </option>
                     ))}
                   </select>
-                  {unlinkedProducts.length === 0 && (
+                  {availableProductsForEditing.length === 0 && (
                     <span className="text-sm text-slate-600">
-                      No unlinked products available.
+                      All active products are already linked to this supplier.
                     </span>
                   )}
                 </label>

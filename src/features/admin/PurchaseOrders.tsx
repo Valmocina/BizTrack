@@ -3,7 +3,7 @@ import { DataTable } from "@/components/ui/DataTable"
 import { Icon } from "@/components/ui/Icon"
 import { useLoad } from "@/hooks/useLoad"
 import { downloadExcel } from "@/services/excel"
-import { formatDate, formatPeso } from "@/services/format"
+import { formatDate, formatPeso, formatPrice } from "@/services/format"
 import {
   archivePurchaseOrders,
   createPurchaseOrder,
