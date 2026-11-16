@@ -422,7 +422,7 @@ export function PurchaseOrders({
       formatDate(p.expectedDate),
       <span
         key={`status-${p.id}`}
-        className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${statusTone}`}
+        className={`inline-flex whitespace-nowrap rounded px-2.5 py-1 text-xs font-bold ${statusTone}`}
       >
         {p.status}
       </span>,
@@ -651,9 +651,11 @@ export function PurchaseOrders({
             className="!h-10"
           >
             <option>All statuses</option>
-            {poStatuses.map((status) => (
-              <option key={status}>{status}</option>
-            ))}
+            {poStatuses
+              .filter((status) => status !== "Pending Approval")
+              .map((status) => (
+                <option key={status}>{status}</option>
+              ))}
           </select>
         </label>
       </div>

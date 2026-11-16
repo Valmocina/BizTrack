@@ -1,7 +1,6 @@
 import { useState } from "react"
 import { DataTable } from "@/components/ui/DataTable"
 import { Icon } from "@/components/ui/Icon"
-import { Pill } from "@/components/ui/Pill"
 import { useLoad } from "@/hooks/useLoad"
 import { formatPrice } from "@/services/format"
 import {
@@ -16,10 +15,10 @@ import {
 } from "@/services/productService"
 import type { Notify, Product, StockStatus } from "@/types"
 
-const statusTone: Record<StockStatus, "green" | "red" | "gray"> = {
-  "In Stock": "green",
-  "Low Stock": "red",
-  "Out of Stock": "gray",
+const statusPillClass: Record<StockStatus, string> = {
+  "In Stock": "bg-emerald-100 text-emerald-700",
+  "Low Stock": "bg-rose-100 text-rose-700",
+  "Out of Stock": "bg-slate-100 text-slate-700",
 }
 
 export function ProductTable({
@@ -230,12 +229,14 @@ export function ProductTable({
         <span className="text-slate-400">—</span>
       ),
       p.stock,
-      <Pill tone={statusTone[status]}>
+      <span
+        className={`inline-flex items-center gap-1 rounded px-2.5 py-1 text-xs font-bold ${statusPillClass[status]}`}
+      >
         {status === "In Stock" && (
           <span className="h-2 w-2 rounded-full border border-current" />
         )}
         {status}
-      </Pill>,
+      </span>,
       ...(canEdit
         ? [
             <div className="flex gap-3 text-slate-400">
